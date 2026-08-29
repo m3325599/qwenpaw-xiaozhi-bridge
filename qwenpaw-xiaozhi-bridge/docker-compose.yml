@@ -1,0 +1,17 @@
+services:
+  xiaozhi-bridge:
+    build: .
+    container_name: xiaozhi-bridge
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      # QwenPaw 运行在宿主机上时，容器内通过下面的地址访问
+      - QWENPAW_BASE_URL=http://host.docker.internal:8088
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+    # 备选方案：直接使用宿主机网络（把上面的 ports/environment 注释掉，
+    # 取消下面的注释，此时 QWENPAW_BASE_URL 用 http://127.0.0.1:8088）
+    # network_mode: host

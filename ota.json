@@ -1,0 +1,6 @@
+{
+  "firmware": {
+    "version": "2.5.10",
+    "url": "https://git.maopi.org/https://raw.githubusercontent.com/haigechangqing/xiaozhi-esp32/main/update/xiaozhi.bin"
+  }
+}

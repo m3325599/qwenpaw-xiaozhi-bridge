@@ -1,0 +1,182 @@
+name: Build XingZhi Cube 0.96 OLED (ML307)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_to_release:
+        description: 'Upload firmware to GitHub Release (includes OTA file)'
+        type: boolean
+        default: true
+        required: false
+  push:
+    branches:
+      - main
+    paths:
+      - 'main/boards/xingzhi-cube-0.96oled-ml307/**'
+      - 'main/boards/common/**'
+      - 'main/audio/**'
+      - 'main/display/**'
+      - 'main/led/**'
+      - 'main/protocols/**'
+      - 'main/mcp_server.*'
+      - 'main/application.*'
+      - 'main/ota.*'
+      - 'main/settings.*'
+      - 'main/assets.*'
+      - 'main/device_state*'
+      - 'main/system_info.*'
+      - 'main/main.cc'
+      - 'main/CMakeLists.txt'
+      - 'main/idf_component.yml'
+      - 'main/Kconfig.projbuild'
+      - 'CMakeLists.txt'
+      - 'sdkconfig.defaults'
+      - 'sdkconfig.defaults.esp32s3'
+      - 'partitions/**'
+      - '.github/workflows/build-xingzhi-cube.yml'
+      # 排除 CI 自动提交的文件，防止无限循环
+      - '!update/**'
+      - '!ota.json'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build xingzhi-cube-0.96oled-ml307
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v6.0.1
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Build firmware
+        shell: bash
+        run: |
+          source $IDF_PATH/export.sh
+          # 清除旧的 sdkconfig，确保 sdkconfig.defaults 中的配置生效（如地理编码 provider）
+          rm -f sdkconfig
+          idf.py fullclean 2>/dev/null || true
+          python scripts/release.py xingzhi-cube-0.96oled-ml307 --name xingzhi-cube-0.96oled-ml307
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          VER=$(grep 'set(PROJECT_VER' CMakeLists.txt | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$VER" >> $GITHUB_OUTPUT
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xingzhi-cube-0.96oled-ml307_v${{ steps.version.outputs.version }}
+          path: |
+            build/merged-binary.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/xiaozhi.bin
+          if-no-files-found: error
+
+      - name: Generate release notes
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release) }}
+        shell: bash
+        run: |
+          cat > release_body.md << 'BODYEOF'
+          ## 文件说明
+          | 文件 | 用途 |
+          |---|---|
+          | `merged-binary.bin` | USB 刷入（完整固件，地址 0x0） |
+          | `xiaozhi.bin` | OTA 升级（仅 app 固件） |
+
+          ## OTA 升级
+          对设备说：**"帮我升级固件"**，固件会从最新 Release 下载。
+          BODYEOF
+
+      - name: Delete old tag and release
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release) }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.version.outputs.version }}-xingzhi-cube"
+          # Delete existing release
+          gh release delete "$TAG" --yes --repo ${{ github.repository }} 2>/dev/null || true
+          # Delete remote tag
+          git push origin --delete "$TAG" 2>/dev/null || true
+
+      - name: Create/Update Release
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release) }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-xingzhi-cube
+          name: 星智 Cube 0.96 OLED v${{ steps.version.outputs.version }}
+          body_path: release_body.md
+          files: |
+            build/merged-binary.bin
+            build/xiaozhi.bin
+          prerelease: true
+          make_latest: true
+
+  update-ota:
+    name: Update OTA firmware in repository
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ always() && needs.build.result == 'success' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          token: ${{ github.token }}
+          fetch-depth: 0
+
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: xingzhi-cube-0.96oled-ml307_v${{ needs.build.outputs.version }}
+          path: artifacts
+
+      - name: Update OTA files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -x
+          mkdir -p update
+          cp artifacts/xiaozhi.bin update/xiaozhi.bin
+          ls -lh update/xiaozhi.bin
+
+          git config --global --add safe.directory "$(pwd)"
+          git config user.email "ci@github-actions.local"
+          git config user.name "GitHub Actions"
+          git add -f update/xiaozhi.bin
+
+          # push 或 workflow_dispatch 且上传 release 时，同时更新 ota.json 版本号
+          if [ "${{ github.event_name }}" = "push" ] || ([ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.upload_to_release }}" = "true" ]); then
+            cat > ota.json << JSONEOF
+          {
+            "firmware": {
+              "version": "${{ needs.build.outputs.version }}",
+              "url": "https://git.maopi.org/https://raw.githubusercontent.com/${{ github.repository }}/main/update/xiaozhi.bin"
+            }
+          }
+          JSONEOF
+            git add ota.json
+            git diff --cached --stat || true
+            git commit -m "chore: update firmware to v${{ needs.build.outputs.version }} [skip ci]" || echo "Commit failed or nothing to commit"
+          else
+            git diff --cached --stat || true
+            git commit -m "chore: update OTA firmware binary [skip ci]" || echo "Commit failed or nothing to commit"
+          fi
+
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          git push origin main || echo "Push failed"
