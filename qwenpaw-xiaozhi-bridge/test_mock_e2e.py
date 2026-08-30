@@ -27,6 +27,7 @@ from bridge.server import create_app
 BRIDGE_PORT = 18000
 QWENPAW_PORT = 18088
 REPLY = "你好！我是QwenPaw。很高兴认识你。"
+REASONING = "这是思考过程，不应该被播出来。"
 
 # ---------------------------------------------------------------- mock ASR
 
@@ -89,29 +90,78 @@ async def mock_qwenpaw_chat(request: web.Request) -> web.Response:
     assert body["channel"] == "console"
     resp = web.StreamResponse(headers={"Content-Type": "text/event-stream"})
     await resp.prepare(request)
-    for i in range(1, len(REPLY) + 1):
-        event = {
-            "sequence_number": i,
-            "object": "response",
-            "status": "in_progress",
-            "output": [
-                {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": REPLY[:i]}],
-                }
-            ],
-        }
-        await resp.write(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode())
+
+    def sse(event: dict) -> bytes:
+        return f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode()
+
+    resp_id = "response_test"
+    reason_id = "msg_reasoning"
+    reply_id = "msg_reply"
+    seq = 0
+
+    # Mirror the real AgentScope Runtime SSE shape: a reasoning message whose
+    # text deltas must be filtered out, followed by the final message.
+    seq += 1
+    await resp.write(
+        sse({"id": resp_id, "object": "response", "status": "created", "output": [], "sequence_number": seq})
+    )
+    seq += 1
+    await resp.write(
+        sse({"id": reason_id, "type": "reasoning", "role": "assistant", "content": [],
+             "status": "in_progress", "object": "message", "sequence_number": seq})
+    )
+    for ch in REASONING:
+        seq += 1
+        await resp.write(
+            sse({"type": "text", "delta": True, "index": 0, "object": "content",
+                 "msg_id": reason_id, "text": ch, "sequence_number": seq})
+        )
+    seq += 1
+    await resp.write(
+        sse({"type": "text", "delta": False, "index": 0, "object": "content",
+             "msg_id": reason_id, "text": REASONING, "sequence_number": seq})
+    )
+    seq += 1
+    await resp.write(
+        sse({"id": reason_id, "type": "reasoning", "role": "assistant",
+             "content": [{"type": "text", "text": REASONING}],
+             "status": "completed", "object": "message", "sequence_number": seq})
+    )
+
+    seq += 1
+    await resp.write(
+        sse({"id": reply_id, "type": "message", "role": "assistant", "content": [],
+             "status": "in_progress", "object": "message", "sequence_number": seq})
+    )
+    for ch in REPLY:
+        seq += 1
+        await resp.write(
+            sse({"type": "text", "delta": True, "index": 0, "object": "content",
+                 "msg_id": reply_id, "text": ch, "sequence_number": seq})
+        )
         await asyncio.sleep(0.005)
-    done = {
-        "sequence_number": len(REPLY) + 1,
-        "object": "response",
-        "status": "completed",
-        "output": [
-            {"role": "assistant", "content": [{"type": "text", "text": REPLY}]}
-        ],
-    }
-    await resp.write(f"data: {json.dumps(done, ensure_ascii=False)}\n\n".encode())
+    seq += 1
+    await resp.write(
+        sse({"type": "text", "delta": False, "index": 0, "object": "content",
+             "msg_id": reply_id, "text": REPLY, "sequence_number": seq})
+    )
+    seq += 1
+    await resp.write(
+        sse({"id": reply_id, "type": "message", "role": "assistant",
+             "content": [{"type": "text", "text": REPLY}],
+             "status": "completed", "object": "message", "sequence_number": seq})
+    )
+    seq += 1
+    await resp.write(
+        sse({"id": resp_id, "object": "response", "status": "completed",
+             "output": [
+                 {"id": reason_id, "type": "reasoning", "role": "assistant",
+                  "content": [{"type": "text", "text": REASONING}]},
+                 {"id": reply_id, "type": "message", "role": "assistant",
+                  "content": [{"type": "text", "text": REPLY}]},
+             ],
+             "sequence_number": seq})
+    )
     return resp
 
 
