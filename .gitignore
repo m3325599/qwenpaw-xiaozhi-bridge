@@ -8,7 +8,11 @@ dist/
 sdkconfig.old
 sdkconfig
 dependencies.lock
+# 环境与密钥（任何位置都不要入库）
 .env
+.env.*
+!.env.example
+qwenpaw-xiaozhi-bridge/.env
 releases/
 main/assets/lang_config.h
 main/mmap_generate_emoji.h
