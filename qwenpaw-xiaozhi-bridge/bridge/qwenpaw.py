@@ -1,9 +1,11 @@
 """QwenPaw REST client: chat via ``POST /api/console/chat`` (SSE stream).
 
 The endpoint follows the AgentScope Runtime protocol: it returns a stream of
-``data: {...}`` Server-Sent Events whose ``output`` field carries the
-assistant message (cumulative). This client converts the stream into text
-deltas and yields them to the caller.
+``data: {...}`` Server-Sent Events. Assistant text is emitted as incremental
+``{"object": "content", "type": "text", "delta": true, "text": ...}`` events,
+each tagged with a ``msg_id`` that links back to its parent message. A message
+whose ``type`` is ``reasoning`` is the model's thinking and is ignored; only
+``message`` content is streamed to the caller.
 """
 
 from __future__ import annotations
@@ -68,27 +70,46 @@ class QwenPawClient:
                 if resp.status != 200:
                     body = (await resp.text())[:300]
                     raise QwenPawError(f"QwenPaw HTTP {resp.status}: {body}")
-                prev_text = ""
+                # msg_id -> message kind ("reasoning" | "message"); reasoning
+                # content must be filtered out of the spoken reply.
+                msg_kind: dict[str, str] = {}
+                # msg_ids whose incremental deltas have already been yielded.
+                streamed: set[str] = set()
                 async for event in self._iter_sse(resp):
-                    status = event.get("status", "")
+                    obj = event.get("object")
+                    etype = event.get("type")
+                    status = event.get("status")
+                    eid = event.get("id")
+
+                    # Register each message's kind when it first appears, so we
+                    # can later tell reasoning apart from the final message.
+                    if obj == "message" and eid and etype in ("reasoning", "message"):
+                        msg_kind[eid] = etype
+
                     if status == "failed":
                         error = event.get("error") or {}
                         message = (
                             error.get("message") if isinstance(error, dict) else str(error)
                         ) or "agent failed"
                         raise QwenPawError(f"QwenPaw: {message}")
-                    current = _extract_text(event)
-                    if current.startswith(prev_text):
-                        # Cumulative output: yield only the new suffix.
-                        delta = current[len(prev_text):]
-                        prev_text = current
-                    else:
-                        # Delta-style or replaced output: append it all.
-                        delta = current
-                        prev_text = prev_text + current
-                    if delta:
-                        yield delta
-                    if status == "completed":
+
+                    if obj == "content" and etype == "text" and "text" in event:
+                        msg_id = event.get("msg_id")
+                        # Skip the model's thinking content entirely.
+                        if msg_kind.get(msg_id) == "reasoning":
+                            continue
+                        chunk = event.get("text") or ""
+                        if event.get("delta") is True:
+                            # Incremental chunk: stream it immediately.
+                            if chunk:
+                                streamed.add(msg_id)
+                                yield chunk
+                        elif msg_id not in streamed and chunk:
+                            # No incremental deltas arrived (non-streaming
+                            # fallback): emit the full text once.
+                            yield chunk
+
+                    if obj == "response" and status == "completed":
                         return
         except aiohttp.ClientError as exc:
             raise QwenPawError(f"无法连接 QwenPaw ({exc})") from exc
@@ -125,23 +146,3 @@ class QwenPawClient:
                 return resp.status < 500
         except Exception:  # noqa: BLE001
             return False
-
-
-def _extract_text(event: dict) -> str:
-    """Concatenate assistant text parts from a response event."""
-    output = event.get("output")
-    if not isinstance(output, list):
-        return ""
-    parts: list[str] = []
-    for item in output:
-        if not isinstance(item, dict) or item.get("role") != "assistant":
-            continue
-        content = item.get("content")
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                text = block.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-    return "".join(parts)
