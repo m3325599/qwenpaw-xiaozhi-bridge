@@ -1,0 +1,36 @@
+# ---- Python bytecode & caches ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- Project local ----
+.env                 # 含真实 API Key，不要提交
+.env.local
+logs/                # 运行日志
+*.log
+
+# ---- IDE / editor ----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+
+# ---- Distribution / packaging ----
+build/
+dist/
+*.egg-info/
+.eggs/
+wheelhouse/
