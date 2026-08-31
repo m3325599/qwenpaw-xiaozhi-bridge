@@ -109,7 +109,7 @@ class Config:
                 "https://api.siliconflow.cn/v1/audio/transcriptions",
             ),
             asr_transcribe_model=_get(
-                "ASR_TRANSCRIBE_MODEL", "FunAudioLLM/SenseVoiceSmall"
+                "ASR_TRANSCRIBE_MODEL", "iic/SenseVoiceSmall"
             ),
             asr_transcribe_key=asr_transcribe_key,
             tts_provider=tts_provider,

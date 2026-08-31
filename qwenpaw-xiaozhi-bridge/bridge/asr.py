@@ -2,7 +2,7 @@
 
 - :class:`AsrStream`: DashScope streaming ASR (paraformer-realtime).
 - :class:`TranscribeAsrStream`: free OpenAI-compatible transcription API
-  (default: SiliconFlow ``FunAudioLLM/SenseVoiceSmall``, free tier). Audio is
+  (default: SiliconFlow ``iic/SenseVoiceSmall``, free tier). Audio is
   buffered while the user speaks and POSTed as a WAV once the utterance ends.
 
 Both expose the same interface used by the session:
