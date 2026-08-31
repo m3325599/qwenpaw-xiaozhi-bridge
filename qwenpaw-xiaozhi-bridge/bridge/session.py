@@ -17,9 +17,11 @@ Pipeline for one voice interaction:
 
 from __future__ import annotations
 
+import array
 import asyncio
 import json
 import logging
+import math
 import re
 import time
 import uuid
@@ -49,6 +51,24 @@ logger = logging.getLogger("bridge.session")
 # Sentence boundaries for TTS flushing.
 _SENTENCE_RE = re.compile(r"[^。！？!?；;\n]*[。！？!?；;\n]+")
 _HARD_FLUSH_LEN = 100
+
+# 服务端 VAD（供非流式 transcribe 后端在 auto 模式下做静音判定）的阈值。
+_VAD_CALIBRATION_FRAMES = 10  # 前 N 帧（约 600ms）用于估计噪声底噪
+_VAD_FLOOR_FALLBACK = 120.0  # 校准期无静音帧时的回退噪声水平
+_VAD_FLOOR_RATIO = 4.0  # 语音阈值 = 噪声底噪 * 比值
+_VAD_MIN_RMS = 500.0  # 语音阈值的绝对下限
+
+
+def _rms_int16(pcm: bytes) -> float:
+    """16-bit mono PCM 的 RMS 能量，用于服务端 VAD。"""
+    if not pcm:
+        return 0.0
+    samples = array.array("h")
+    samples.frombytes(pcm)
+    n = len(samples)
+    if n == 0:
+        return 0.0
+    return math.sqrt(sum(s * s for s in samples) / n)
 
 
 class DeviceRegistry:
@@ -107,6 +127,12 @@ class DeviceSession:
         self._listen_mode = "auto"
         self._silence_task: asyncio.Task | None = None
         self._asr_error_spoken = False
+
+        # 服务端 VAD（仅 transcribe 后端 + auto 模式使用）
+        self._vad_floor: float | None = None
+        self._vad_init_count = 0
+        self._vad_speech = False
+        self._vad_silence_ms = 0.0
 
         # Response state
         self._response_task: asyncio.Task | None = None
@@ -228,6 +254,42 @@ class DeviceSession:
         if not pcm:
             return
         await self.loop.run_in_executor(self._executor, self._asr.feed_sync, pcm)
+        if self.cfg.asr_provider == "transcribe" and self._listen_mode != "manual":
+            await self._vad_check(pcm)
+
+    async def _vad_check(self, pcm: bytes) -> None:
+        """服务端静音判定：仅用于非流式 transcribe 后端 + auto 模式。
+
+        DashScope 流式 ASR 会用句子结束事件结束一句话；transcribe 后端没有
+        流式事件，auto 模式下固件也不会主动发 listen stop，所以这里用能量
+        检测补上：检测到说话后，连续静音超过 UTTERANCE_SILENCE 秒即结束本句。
+        """
+        rms = _rms_int16(pcm)
+        frame_ms = len(pcm) / 2 / self.decoder.sample_rate * 1000.0
+
+        # 前若干帧估计噪声底噪（取最小值，抵抗少数高能量帧）
+        if self._vad_init_count < _VAD_CALIBRATION_FRAMES:
+            if self._vad_floor is None or rms < self._vad_floor:
+                self._vad_floor = rms
+            self._vad_init_count += 1
+            return
+
+        # 校准期若完全没有静音帧（噪声估计虚高），回退到固定噪声水平
+        noise = self._vad_floor if self._vad_floor is not None else _VAD_FLOOR_FALLBACK
+        if noise > 1500.0:
+            noise = _VAD_FLOOR_FALLBACK
+        threshold = max(noise * _VAD_FLOOR_RATIO, _VAD_MIN_RMS)
+
+        if not self._vad_speech:
+            if rms >= threshold:
+                self._vad_speech = True
+                self._vad_silence_ms = 0.0
+        elif rms >= threshold:
+            self._vad_silence_ms = 0.0
+        else:
+            self._vad_silence_ms += frame_ms
+            if self._vad_silence_ms >= self.cfg.utterance_silence * 1000.0:
+                await self._finish_utterance()
 
     # ------------------------------------------------------------------ ASR
 
@@ -246,6 +308,10 @@ class DeviceSession:
 
     async def _start_asr(self) -> None:
         self._asr_sentences = []
+        self._vad_floor = None
+        self._vad_init_count = 0
+        self._vad_speech = False
+        self._vad_silence_ms = 0.0
         try:
             if self.cfg.asr_provider == "transcribe":
                 stream = TranscribeAsrStream(
