@@ -64,7 +64,7 @@ python main.py
 | `QWENPAW_CHANNEL` | `console` | 对话使用的通道 |
 | `DASHSCOPE_API_KEY` | 必填 | 阿里云百炼 API Key |
 | `ASR_MODEL` | `paraformer-realtime-v2` | 流式识别模型 |
-| `TTS_MODEL` / `TTS_VOICE` | `cosyvoice-v2` / `longxiaochun` | 合成模型与音色 |
+| `TTS_MODEL` / `TTS_VOICE` | `cosyvoice-v2` / `longxiaochun_v2` | 合成模型与音色（v2 模型必须用 `_v2` 后缀音色） |
 | `TTS_SAMPLE_RATE` | `24000` | 下行采样率（16000/24000） |
 | `UTTERANCE_SILENCE` | `0.8` | 自动模式句尾静音判定时长（秒） |
 | `MCP_TIMEOUT` | `30` | 设备 MCP 工具调用超时（秒） |

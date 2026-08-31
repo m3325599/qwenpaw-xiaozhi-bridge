@@ -73,7 +73,7 @@ class Config:
             dashscope_api_key=_get("DASHSCOPE_API_KEY"),
             asr_model=_get("ASR_MODEL", "paraformer-realtime-v2"),
             tts_model=_get("TTS_MODEL", "cosyvoice-v2"),
-            tts_voice=_get("TTS_VOICE", "longxiaochun"),
+            tts_voice=_get("TTS_VOICE", "longxiaochun_v2"),
             tts_sample_rate=_get_int("TTS_SAMPLE_RATE", 24000),
             utterance_silence=_get_float("UTTERANCE_SILENCE", 0.8),
             mcp_timeout=_get_float("MCP_TIMEOUT", 30.0),
