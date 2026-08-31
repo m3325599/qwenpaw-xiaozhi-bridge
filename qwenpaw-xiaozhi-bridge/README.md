@@ -59,7 +59,7 @@ python main.py
 | `BRIDGE_HOST` / `BRIDGE_PORT` | `0.0.0.0` / `8089`                 | 监听地址与端口（千问 Paw 8088 + 1）         |
 | `BRIDGE_TOKEN`                | 空                                  | 设备接入令牌，留空不校验；需与固件 menuconfig 中一致 |
 | `QWENPAW_BASE_URL`            | `http://127.0.0.1:8088`            | QwenPaw 地址（本机 localhost 免鉴权）     |
-| `QWENPAW_AGENT_ID`            | `default`                          | 控制台左上角选择的智能体 ID                  |
+| `QWENPAW_AGENT_ID`            | `xiaozhi`                          | 控制台左上角选择的智能体 ID                  |
 | `QWENPAW_API_TOKEN`           | 空                                  | QwenPaw 开启 Web 登录且跨机访问时填写        |
 | `QWENPAW_CHANNEL`             | `console`                          | 对话使用的通道                          |
 | `DASHSCOPE_API_KEY`           | 必填                                 | 阿里云百炼 API Key                    |

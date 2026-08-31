@@ -99,7 +99,7 @@ class Config:
             port=_get_int("BRIDGE_PORT", 8089),
             token=_get("BRIDGE_TOKEN"),
             qwenpaw_base_url=_get("QWENPAW_BASE_URL", "http://127.0.0.1:8088"),
-            qwenpaw_agent_id=_get("QWENPAW_AGENT_ID", "default"),
+            qwenpaw_agent_id=_get("QWENPAW_AGENT_ID", "xiaozhi"),
             qwenpaw_api_token=_get("QWENPAW_API_TOKEN"),
             qwenpaw_channel=_get("QWENPAW_CHANNEL", "console"),
             asr_provider=asr_provider,
