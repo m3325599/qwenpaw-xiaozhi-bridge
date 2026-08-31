@@ -54,20 +54,20 @@ python main.py
 
 ## 配置说明
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `BRIDGE_HOST` / `BRIDGE_PORT` | `0.0.0.0` / `8089` | 监听地址与端口（千问 Paw 8088 + 1） |
-| `BRIDGE_TOKEN` | 空 | 设备接入令牌，留空不校验；需与固件 menuconfig 中一致 |
-| `QWENPAW_BASE_URL` | `http://127.0.0.1:8088` | QwenPaw 地址（本机 localhost 免鉴权） |
-| `QWENPAW_AGENT_ID` | `default` | 控制台左上角选择的智能体 ID |
-| `QWENPAW_API_TOKEN` | 空 | QwenPaw 开启 Web 登录且跨机访问时填写 |
-| `QWENPAW_CHANNEL` | `console` | 对话使用的通道 |
-| `DASHSCOPE_API_KEY` | 必填 | 阿里云百炼 API Key |
-| `ASR_MODEL` | `paraformer-realtime-v2` | 流式识别模型 |
-| `TTS_MODEL` / `TTS_VOICE` | `cosyvoice-v2` / `longxiaochun_v2` | 合成模型与音色（v2 模型必须用 `_v2` 后缀音色） |
-| `TTS_SAMPLE_RATE` | `24000` | 下行采样率（16000/24000） |
-| `UTTERANCE_SILENCE` | `0.8` | 自动模式句尾静音判定时长（秒） |
-| `MCP_TIMEOUT` | `30` | 设备 MCP 工具调用超时（秒） |
+| 变量                            | 默认值                                | 说明                               |
+| ----------------------------- | ---------------------------------- | -------------------------------- |
+| `BRIDGE_HOST` / `BRIDGE_PORT` | `0.0.0.0` / `8089`                 | 监听地址与端口（千问 Paw 8088 + 1）         |
+| `BRIDGE_TOKEN`                | 空                                  | 设备接入令牌，留空不校验；需与固件 menuconfig 中一致 |
+| `QWENPAW_BASE_URL`            | `http://127.0.0.1:8088`            | QwenPaw 地址（本机 localhost 免鉴权）     |
+| `QWENPAW_AGENT_ID`            | `default`                          | 控制台左上角选择的智能体 ID                  |
+| `QWENPAW_API_TOKEN`           | 空                                  | QwenPaw 开启 Web 登录且跨机访问时填写        |
+| `QWENPAW_CHANNEL`             | `console`                          | 对话使用的通道                          |
+| `DASHSCOPE_API_KEY`           | 必填                                 | 阿里云百炼 API Key                    |
+| `ASR_MODEL`                   | `paraformer-realtime-v2`           | 流式识别模型                           |
+| `TTS_MODEL` / `TTS_VOICE`     | `cosyvoice-v2` / `longxiaochun_v2` | 合成模型与音色（v2 模型必须用 `_v2` 后缀音色）     |
+| `TTS_SAMPLE_RATE`             | `24000`                            | 下行采样率（16000/24000）               |
+| `UTTERANCE_SILENCE`           | `0.8`                              | 自动模式句尾静音判定时长（秒）                  |
+| `MCP_TIMEOUT`                 | `30`                               | 设备 MCP 工具调用超时（秒）                 |
 
 ## ESP32 固件配置
 
@@ -88,12 +88,12 @@ idf.py build flash monitor
 
 ## HTTP 管理接口
 
-| 接口 | 说明 |
-| --- | --- |
-| `GET /` | 服务信息 |
-| `GET /healthz` | 健康检查 |
-| `GET /devices` | 在线设备列表（含已发现的 MCP 工具名） |
-| `GET /devices/{id}/tools` | 某设备全部工具定义 |
+| 接口                              | 说明                                                 |
+| ------------------------------- | -------------------------------------------------- |
+| `GET /`                         | 服务信息                                               |
+| `GET /healthz`                  | 健康检查                                               |
+| `GET /devices`                  | 在线设备列表（含已发现的 MCP 工具名）                              |
+| `GET /devices/{id}/tools`       | 某设备全部工具定义                                          |
 | `POST /devices/{id}/tools/call` | 调用设备工具，body: `{"name": "...", "arguments": {...}}` |
 
 示例——查看在线设备并调用设备状态工具：
@@ -118,11 +118,15 @@ python test_mock_e2e.py
 
 ## 常见问题
 
-- **设备连不上**：先 `curl http://<ip>:8089/healthz` 确认服务可达；固件 URL 必须带路径 `/xiaozhi/v1/`；若设置了 `BRIDGE_TOKEN`，固件侧 token 不一致会 401。
-- **ASR/TTS 报错**：检查 `DASHSCOPE_API_KEY` 是否有效、百炼控制台是否开通了对应模型的免费额度。
-- **QwenPaw 返回 401/403**：本机访问用 `http://127.0.0.1:8088` 免鉴权；跨机访问需在 QwenPaw 开启 API 访问并填写 `QWENPAW_API_TOKEN`。
-- **打断无效/回声**：确认固件使用服务端 AEC 关闭（`CONFIG_USE_SERVER_AEC` 未启用）且唤醒词检测正常，打断依赖设备端发送 `abort`。
-- **想换音色/语速**：改 `.env` 中 `TTS_VOICE`（如 `longwan`、`longcheng`）后重启容器。
+* **设备连不上**：先 `curl http://<ip>:8089/healthz` 确认服务可达；固件 URL 必须带路径 `/xiaozhi/v1/`；若设置了 `BRIDGE_TOKEN`，固件侧 token 不一致会 401。
+
+* **ASR/TTS 报错**：检查 `DASHSCOPE_API_KEY` 是否有效、百炼控制台是否开通了对应模型的免费额度。
+
+* **QwenPaw 返回 401/403**：本机访问用 `http://127.0.0.1:8088` 免鉴权；跨机访问需在 QwenPaw 开启 API 访问并填写 `QWENPAW_API_TOKEN`。
+
+* **打断无效/回声**：确认固件使用服务端 AEC 关闭（`CONFIG_USE_SERVER_AEC` 未启用）且唤醒词检测正常，打断依赖设备端发送 `abort`。
+
+* **想换音色/语速**：改 `.env` 中 `TTS_VOICE`（如 `longwan`、`longcheng`）后重启容器。
 
 ## 目录结构
 
@@ -142,3 +146,4 @@ qwenpaw-xiaozhi-bridge/
 ├── Dockerfile / docker-compose.yml
 └── .env.example
 ```
+

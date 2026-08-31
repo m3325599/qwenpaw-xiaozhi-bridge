@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import AsyncIterator, Optional
 
 import aiohttp
@@ -65,6 +66,8 @@ class QwenPawClient:
         }
 
         session = await self._get_session()
+        started = time.monotonic()
+        first_delta_logged = False
         try:
             async with session.post(self._chat_url, json=payload, headers=headers) as resp:
                 if resp.status != 200:
@@ -102,14 +105,29 @@ class QwenPawClient:
                         if event.get("delta") is True:
                             # Incremental chunk: stream it immediately.
                             if chunk:
+                                if not first_delta_logged:
+                                    first_delta_logged = True
+                                    logger.info(
+                                        "QwenPaw 首个增量 %.1fs（含思考时间）",
+                                        time.monotonic() - started,
+                                    )
                                 streamed.add(msg_id)
                                 yield chunk
                         elif msg_id not in streamed and chunk:
                             # No incremental deltas arrived (non-streaming
                             # fallback): emit the full text once.
+                            if not first_delta_logged:
+                                first_delta_logged = True
+                                logger.info(
+                                    "QwenPaw 首个增量 %.1fs（非流式整体返回）",
+                                    time.monotonic() - started,
+                                )
                             yield chunk
 
                     if obj == "response" and status == "completed":
+                        logger.info(
+                            "QwenPaw 回复完成，总耗时 %.1fs", time.monotonic() - started
+                        )
                         return
         except aiohttp.ClientError as exc:
             raise QwenPawError(f"无法连接 QwenPaw ({exc})") from exc

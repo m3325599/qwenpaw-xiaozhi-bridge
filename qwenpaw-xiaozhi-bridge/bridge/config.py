@@ -33,6 +33,18 @@ def _get_float(key: str, default: float) -> float:
         return default
 
 
+def _normalize_voice(voice: str, model: str) -> str:
+    """ cosyvoice-v2/v3 只接受带对应代号后缀的音色名，
+    裸 v1 音色名会导致引擎报 418 InvalidParameter，这里自动补后缀。"""
+    if model.startswith("cosyvoice-v"):
+        version = model[len("cosyvoice-v"):]
+        if version.isdigit():
+            suffix = f"_v{version}"
+            if not voice.endswith(suffix):
+                return voice + suffix
+    return voice
+
+
 @dataclass
 class Config:
     """Runtime configuration of the bridge."""
@@ -73,7 +85,9 @@ class Config:
             dashscope_api_key=_get("DASHSCOPE_API_KEY"),
             asr_model=_get("ASR_MODEL", "paraformer-realtime-v2"),
             tts_model=_get("TTS_MODEL", "cosyvoice-v2"),
-            tts_voice=_get("TTS_VOICE", "longxiaochun_v2"),
+            tts_voice=_normalize_voice(
+                _get("TTS_VOICE", "longxiaochun_v2"), _get("TTS_MODEL", "cosyvoice-v2")
+            ),
             tts_sample_rate=_get_int("TTS_SAMPLE_RATE", 24000),
             utterance_silence=_get_float("UTTERANCE_SILENCE", 0.8),
             mcp_timeout=_get_float("MCP_TIMEOUT", 30.0),

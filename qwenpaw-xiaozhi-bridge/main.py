@@ -5,20 +5,55 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from logging.handlers import TimedRotatingFileHandler
 
 from aiohttp import web
 
 from bridge.config import Config
 from bridge.server import create_app
 
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "bridge.log")
+
+
+def _setup_logging(level: str) -> None:
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, level, logging.INFO))
+    fmt = logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+
+    # 控制台输出
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    root.addHandler(console)
+
+    # 每天零点滚动一个日志文件，保留最近 14 天
+    os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+    file_handler = TimedRotatingFileHandler(
+        LOG_FILE, when="midnight", backupCount=14, encoding="utf-8"
+    )
+    file_handler.setFormatter(fmt)
+    root.addHandler(file_handler)
+
+
+def _silence_win_proactor_gc() -> None:
+    """ Python 3.8 + Windows Proactor 事件循环关闭时，
+    WebSocket 传输对象的 __del__ 会向已关闭的 loop 投递回调，
+    在 stderr 打出大量 "Event loop is closed" 噪音，屏蔽掉。"""
+    if sys.platform == "win32":
+        try:
+            from asyncio.proactor_events import _ProactorBasePipeTransport
+
+            _ProactorBasePipeTransport.__del__ = lambda self: None  # type: ignore[assignment]
+        except Exception:  # noqa: BLE001
+            pass
+
 
 def main() -> None:
     cfg = Config.from_env()
 
-    logging.basicConfig(
-        level=getattr(logging, cfg.log_level, logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    _setup_logging(cfg.log_level)
+    _silence_win_proactor_gc()
 
     errors = cfg.validate()
     if errors:
