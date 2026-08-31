@@ -35,8 +35,8 @@ cp .env.example .env
 # 编辑 .env：至少填 DASHSCOPE_API_KEY，其余按需调整
 docker compose up -d --build
 
-# 验证
-curl http://127.0.0.1:8000/healthz
+# 验证（千问 Paw 端口 8088 + 1 = 8089）
+curl http://127.0.0.1:8089/healthz
 ```
 
 QwenPaw 运行在宿主机上时，docker-compose 已把 `QWENPAW_BASE_URL` 自动指向 `http://host.docker.internal:8088`。
@@ -56,7 +56,7 @@ python main.py
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `BRIDGE_HOST` / `BRIDGE_PORT` | `0.0.0.0` / `8000` | 监听地址与端口 |
+| `BRIDGE_HOST` / `BRIDGE_PORT` | `0.0.0.0` / `8089` | 监听地址与端口（千问 Paw 8088 + 1） |
 | `BRIDGE_TOKEN` | 空 | 设备接入令牌，留空不校验；需与固件 menuconfig 中一致 |
 | `QWENPAW_BASE_URL` | `http://127.0.0.1:8088` | QwenPaw 地址（本机 localhost 免鉴权） |
 | `QWENPAW_AGENT_ID` | `default` | 控制台左上角选择的智能体 ID |
@@ -76,7 +76,7 @@ python main.py
 ```bash
 idf.py menuconfig
 # Xiaozhi Assistant → QwenPaw Bridge Server
-#   QWENPAW_WS_URL            ws://<服务器IP>:8000/xiaozhi/v1/
+#   QWENPAW_WS_URL            ws://<服务器IP>:8089/xiaozhi/v1/
 #   QWENPAW_WS_TOKEN          与 BRIDGE_TOKEN 一致（可留空）
 #   QWENPAW_WS_PROTOCOL_VERSION  3
 idf.py build flash monitor
@@ -99,8 +99,8 @@ idf.py build flash monitor
 示例——查看在线设备并调用设备状态工具：
 
 ```bash
-curl http://127.0.0.1:8000/devices
-curl -X POST http://127.0.0.1:8000/devices/<device-id>/tools/call \
+curl http://127.0.0.1:8089/devices
+curl -X POST http://127.0.0.1:8089/devices/<device-id>/tools/call \
      -H 'Content-Type: application/json' \
      -d '{"name": "self.get_device_status", "arguments": {}}'
 ```
@@ -118,7 +118,7 @@ python test_mock_e2e.py
 
 ## 常见问题
 
-- **设备连不上**：先 `curl http://<ip>:8000/healthz` 确认服务可达；固件 URL 必须带路径 `/xiaozhi/v1/`；若设置了 `BRIDGE_TOKEN`，固件侧 token 不一致会 401。
+- **设备连不上**：先 `curl http://<ip>:8089/healthz` 确认服务可达；固件 URL 必须带路径 `/xiaozhi/v1/`；若设置了 `BRIDGE_TOKEN`，固件侧 token 不一致会 401。
 - **ASR/TTS 报错**：检查 `DASHSCOPE_API_KEY` 是否有效、百炼控制台是否开通了对应模型的免费额度。
 - **QwenPaw 返回 401/403**：本机访问用 `http://127.0.0.1:8088` 免鉴权；跨机访问需在 QwenPaw 开启 API 访问并填写 `QWENPAW_API_TOKEN`。
 - **打断无效/回声**：确认固件使用服务端 AEC 关闭（`CONFIG_USE_SERVER_AEC` 未启用）且唤醒词检测正常，打断依赖设备端发送 `abort`。

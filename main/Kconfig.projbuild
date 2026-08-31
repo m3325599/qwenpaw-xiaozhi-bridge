@@ -1065,7 +1065,7 @@ menu "QwenPaw Bridge Server"
         default ""
         help
             WebSocket URL of your self-hosted QwenPaw bridge server,
-            e.g. ws://192.168.1.100:8000/xiaozhi/v1/
+            e.g. ws://192.168.1.100:8089/xiaozhi/v1/
             When set, the device connects directly to this server using the
             WebSocket protocol and skips the official OTA check / activation
             flow entirely. Leave empty to use the standard OTA provisioning.

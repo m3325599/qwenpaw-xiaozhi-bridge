@@ -64,7 +64,7 @@ class Config:
     def from_env(cls) -> "Config":
         return cls(
             host=_get("BRIDGE_HOST", "0.0.0.0"),
-            port=_get_int("BRIDGE_PORT", 8000),
+            port=_get_int("BRIDGE_PORT", 8089),
             token=_get("BRIDGE_TOKEN"),
             qwenpaw_base_url=_get("QWENPAW_BASE_URL", "http://127.0.0.1:8088"),
             qwenpaw_agent_id=_get("QWENPAW_AGENT_ID", "default"),
