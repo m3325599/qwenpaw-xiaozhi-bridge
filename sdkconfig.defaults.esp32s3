@@ -32,5 +32,6 @@ CONFIG_LV_USE_SNAPSHOT=y
 
 # QwenPaw 桥接直连：设备对话走千问 Paw 平台（跳过官方 OTA/激活）
 # 桥接端口 = 千问 Paw 端口(8088) + 1 = 8089
+# 固件侧启用直连后，开机跳过 OTA 检查，直接连接桥接 WebSocket
 CONFIG_QWENPAW_WS_URL="ws://a.maopi.org:8089/xiaozhi/v1/"
 CONFIG_QWENPAW_WS_PROTOCOL_VERSION=3
