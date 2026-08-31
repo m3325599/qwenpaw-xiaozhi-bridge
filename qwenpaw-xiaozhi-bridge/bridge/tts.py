@@ -1,4 +1,10 @@
-"""DashScope CosyVoice streaming TTS wrapped into a xiaozhi TTS turn.
+"""TTS backends wrapped into a xiaozhi TTS turn.
+
+Two providers are supported:
+
+- ``edge`` (default): Microsoft edge-tts. Free, no API key, no quota.
+  Each sentence is synthesized into MP3 and decoded to PCM locally.
+- ``dashscope``: DashScope CosyVoice streaming synthesis.
 
 A :class:`TtsTurn` represents one assistant response:
 
@@ -8,8 +14,11 @@ A :class:`TtsTurn` represents one assistant response:
   pushed to the device, then sends ``tts stop``,
 - ``abort()`` cancels the turn (user interruption) and also sends ``tts stop``.
 
-PCM arrives on the DashScope SDK thread; it is queued to the event loop,
-sliced into 60 ms frames, Opus-encoded and sent as binary WebSocket frames.
+PCM is sliced into 60 ms frames, Opus-encoded and sent as binary WebSocket
+frames. Downlink frames are paced to real time: the device has a small jitter
+buffer, so dumping frames faster than they are played overflows it and the
+audio turns into mush. The first ~8 frames are allowed to burst (natural
+prebuffer); after that each frame is followed by a 60 ms pacing sleep.
 """
 
 from __future__ import annotations
@@ -19,16 +28,22 @@ import logging
 import re
 from typing import Awaitable, Callable
 
-from dashscope.audio.tts_v2 import AudioFormat, ResultCallback, SpeechSynthesizer
-
 from .config import Config
-from .opus_codec import OpusEncoder
+from .opus_codec import FRAME_DURATION_MS, OpusEncoder
 
 logger = logging.getLogger("bridge.tts")
 
+# DashScope import is lazy: the edge provider works without it.
+try:  # pragma: no cover - import guard
+    from dashscope.audio.tts_v2 import AudioFormat, ResultCallback, SpeechSynthesizer
+except ImportError:  # noqa: BLE001
+    SpeechSynthesizer = None  # type: ignore[assignment]
+    AudioFormat = None  # type: ignore[assignment]
+    ResultCallback = object  # type: ignore[assignment]
+
 _AUDIO_FORMATS = {
-    16000: AudioFormat.PCM_16000HZ_MONO_16BIT,
-    24000: AudioFormat.PCM_24000HZ_MONO_16BIT,
+    16000: AudioFormat.PCM_16000HZ_MONO_16BIT if AudioFormat else None,
+    24000: AudioFormat.PCM_24000HZ_MONO_16BIT if AudioFormat else None,
 }
 
 # JSON / audio senders provided by the session
@@ -36,6 +51,9 @@ SendJson = Callable[[dict], Awaitable[None]]
 SendAudio = Callable[[bytes], Awaitable[None]]
 
 _SENTINEL = object()
+
+# Pacing: allow this many frames of burst before throttling to real time.
+_PREBUFFER_FRAMES = 8
 
 # Strip common markdown noise so the model does not read it out loud.
 _MD_RE = re.compile(r"[*#`_~>|]+")
@@ -48,7 +66,36 @@ def clean_for_tts(text: str) -> str:
     return text.strip()
 
 
-class _TtsCallback(ResultCallback):
+async def _edge_tts_pcm(text: str, voice: str, sample_rate: int) -> bytes:
+    """Synthesize one sentence via edge-tts and decode to PCM16 mono.
+
+    Returns b"" when nothing could be produced.
+    """
+    import edge_tts
+    import miniaudio
+
+    communicate = edge_tts.Communicate(text, voice)
+    mp3 = bytearray()
+    async for chunk in communicate.stream():
+        if chunk.get("type") == "audio" or "data" in chunk:
+            data = chunk.get("data")
+            if data:
+                mp3.extend(data)
+    if not mp3:
+        return b""
+    sound = miniaudio.decode(
+        bytes(mp3),
+        output_format=miniaudio.SampleFormat.SIGNED16,
+        nchannels=1,
+        sample_rate=sample_rate,
+    )
+    try:
+        return sound.samples.tobytes()
+    except AttributeError:  # older miniaudio: array('h')
+        return bytes(memoryview(sound.samples))
+
+
+class _TtsCallback(ResultCallback):  # type: ignore[misc]
     def __init__(
         self,
         loop: asyncio.AbstractEventLoop,
@@ -98,7 +145,7 @@ class TtsTurn:
         self._send_json = send_json
         self._send_audio = send_audio
         self._loop = asyncio.get_running_loop()
-        self._synthesizer: SpeechSynthesizer | None = None
+        self._synthesizer = None
         self._queue: asyncio.Queue = asyncio.Queue()
         self._sender_task: asyncio.Task | None = None
         self._started = False
@@ -117,8 +164,13 @@ class TtsTurn:
         if not self._started:
             await self._start(text)
             return
-        await self._loop.run_in_executor(self._executor, self._synthesizer.streaming_call, text)
-        await self._send_json({"type": "tts", "state": "sentence_start", "text": text})
+        if self._cfg.tts_provider == "edge":
+            await self._edge_speak(text)
+        else:
+            await self._loop.run_in_executor(
+                self._executor, self._synthesizer.streaming_call, text
+            )
+            await self._send_json({"type": "tts", "state": "sentence_start", "text": text})
 
     async def finish(self) -> None:
         """Complete the turn and stop speaking."""
@@ -132,7 +184,10 @@ class TtsTurn:
             await self._send_json({"type": "tts", "state": "start"})
             await self._send_json({"type": "tts", "state": "stop"})
             return
-        await self._loop.run_in_executor(self._executor, self._synthesizer.streaming_complete)
+        if self._cfg.tts_provider != "edge":
+            await self._loop.run_in_executor(
+                self._executor, self._synthesizer.streaming_complete
+            )
         await self._drain()
         await self._send_json({"type": "tts", "state": "stop"})
 
@@ -160,23 +215,40 @@ class TtsTurn:
     async def _start(self, first_text: str) -> None:
         self._started = True
         await self._send_json({"type": "tts", "state": "start"})
+        self._sender_task = asyncio.create_task(self._sender())
+        if self._cfg.tts_provider == "edge":
+            await self._edge_speak(first_text)
+            return
         callback = _TtsCallback(self._loop, self._on_pcm, self._on_error)
         try:
             audio_format = _AUDIO_FORMATS[self._cfg.tts_sample_rate]
         except KeyError:
-            audio_format = AudioFormat.PCM_24000HZ_MONO_16BIT
+            audio_format = _AUDIO_FORMATS.get(24000)
         self._synthesizer = SpeechSynthesizer(
             model=self._cfg.tts_model,
             voice=self._cfg.tts_voice,
             format=audio_format,
             callback=callback,
         )
-        self._sender_task = asyncio.create_task(self._sender())
-        await self._loop.run_in_executor(self._executor, self._synthesizer.streaming_call, first_text)
+        await self._loop.run_in_executor(
+            self._executor, self._synthesizer.streaming_call, first_text
+        )
         await self._send_json({"type": "tts", "state": "sentence_start", "text": first_text})
 
+    async def _edge_speak(self, text: str) -> None:
+        """Synthesize one sentence with edge-tts and queue the PCM."""
+        await self._send_json({"type": "tts", "state": "sentence_start", "text": text})
+        try:
+            pcm = await _edge_tts_pcm(text, self._cfg.edge_tts_voice, self._cfg.tts_sample_rate)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("edge-tts synthesis failed: %s", exc)
+            self._on_error(str(exc))
+            return
+        if pcm:
+            self._on_pcm(pcm)
+
     def _on_pcm(self, data: bytes) -> None:
-        # Runs on the event loop (scheduled from the SDK thread).
+        # Runs on the event loop (scheduled from the SDK thread or directly).
         self._queue.put_nowait(data)
 
     def _on_error(self, message: str) -> None:
@@ -196,10 +268,17 @@ class TtsTurn:
             self._sender_task = None
 
     async def _sender(self) -> None:
-        """Slice queued PCM into 60 ms frames, encode and send."""
+        """Slice queued PCM into 60 ms frames, encode and send.
+
+        Frames are paced to real time so the device playback buffer never
+        overflows (this used to produce garbled / merged-up audio).
+        """
         frame_bytes = self._encoder.frame_bytes
+        frame_sec = FRAME_DURATION_MS / 1000.0
         buf = bytearray()
         finished = False
+        sent_frames = 0
+        next_send_at: float | None = None
         while True:
             if not finished:
                 try:
@@ -220,6 +299,16 @@ class TtsTurn:
                 frame = bytes(buf[:frame_bytes])
                 del buf[:frame_bytes]
                 await self._send_audio(self._encoder.encode(frame))
+                sent_frames += 1
+                if sent_frames > _PREBUFFER_FRAMES:
+                    now = self._loop.time()
+                    if next_send_at is None:
+                        next_send_at = now + frame_sec
+                    else:
+                        next_send_at = max(next_send_at, now - frame_sec) + frame_sec
+                    delay = next_send_at - now
+                    if delay > 0:
+                        await asyncio.sleep(delay)
             if finished:
                 if buf:
                     # Final partial frame padded with silence.

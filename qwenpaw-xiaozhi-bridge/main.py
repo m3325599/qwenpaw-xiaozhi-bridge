@@ -67,11 +67,21 @@ def main() -> None:
 
     app = create_app(cfg)
 
+    if cfg.asr_provider == "transcribe":
+        asr_desc = f"{cfg.asr_transcribe_model}（免费转写 API）"
+    else:
+        asr_desc = f"{cfg.asr_model}（DashScope）"
+    if cfg.tts_provider == "edge":
+        tts_desc = f"edge-tts/{cfg.edge_tts_voice}（免费）"
+    else:
+        tts_desc = f"{cfg.tts_model}({cfg.tts_voice})（DashScope）"
+
     print("=" * 60)
     print(" QwenPaw <-> 小智(ESP32) 桥接服务")
     print(f"   监听地址      : ws://{cfg.host}:{cfg.port}/xiaozhi/v1/")
     print(f"   QwenPaw       : {cfg.qwenpaw_base_url} (agent: {cfg.qwenpaw_agent_id})")
-    print(f"   ASR / TTS     : {cfg.asr_model} / {cfg.tts_model}({cfg.tts_voice})")
+    print(f"   ASR           : {asr_desc}")
+    print(f"   TTS           : {tts_desc}")
     print(f"   设备接入令牌  : {'已启用' if cfg.token else '未启用(不校验)'}")
     print("=" * 60)
 

@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 
 from aiohttp import WSMsgType
 
-from .asr import AsrError, AsrStream
+from .asr import AsrError, AsrStream, TranscribeAsrStream
 from .mcp import McpDeviceClient, McpToolError
 from .opus_codec import (
     OpusDecoder,
@@ -247,7 +247,15 @@ class DeviceSession:
     async def _start_asr(self) -> None:
         self._asr_sentences = []
         try:
-            stream = AsrStream(self.cfg.asr_model, self._on_asr_sentence)
+            if self.cfg.asr_provider == "transcribe":
+                stream = TranscribeAsrStream(
+                    self.cfg.asr_transcribe_url,
+                    self.cfg.asr_transcribe_model,
+                    self.cfg.asr_transcribe_key,
+                    self._on_asr_sentence,
+                )
+            else:
+                stream = AsrStream(self.cfg.asr_model, self._on_asr_sentence)
             await self.loop.run_in_executor(self._executor, stream.start_sync)
             self._asr = stream
         except AsrError as exc:
