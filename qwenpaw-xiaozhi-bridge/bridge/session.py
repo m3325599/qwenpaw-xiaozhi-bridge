@@ -400,7 +400,10 @@ class DeviceSession:
         await self.loop.run_in_executor(self._executor, stream.stop_sync)
         text = stream.final_text or "".join(self._asr_sentences).strip()
         if not text:
-            logger.info("Empty utterance, ignored")
+            # 空结果（如噪音被误判为语音、或没说话）时，重启 ASR 继续监听，
+            # 否则 self._asr 已置空、设备仍在聆听，后续音频全部被丢弃，设备卡住。
+            logger.info("Empty utterance, ignored; restarting ASR to keep listening")
+            await self._start_asr()
             return
         logger.info("Utterance from %s: %s", self.device_id, text)
         await self._send_json({"type": "stt", "text": text})
