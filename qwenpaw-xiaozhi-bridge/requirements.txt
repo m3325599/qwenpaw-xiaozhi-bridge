@@ -5,3 +5,8 @@ opuslib>=3.0.1
 python-dotenv>=1.0.0
 # 仅在使用 DashScope ASR/TTS 时需要（默认 TTS=edge 免费，无需 dashscope）
 dashscope>=1.20.0
+# 本地 TTS（可选，按需安装；两者都依赖 numpy 进行推理与重采样）：
+#   piper-tts   -> TTS_PROVIDER=piper
+#   sherpa-onnx -> TTS_PROVIDER=melo
+# piper-tts>=1.2.0
+# sherpa-onnx>=1.10.0

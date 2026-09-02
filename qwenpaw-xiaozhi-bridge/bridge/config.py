@@ -65,7 +65,7 @@ class Config:
     asr_transcribe_model: str
     asr_transcribe_key: str
 
-    # TTS provider: "edge" (free) | "dashscope"
+    # TTS provider: "edge" | "siliconflow" | "piper" | "melo" | "dashscope"
     tts_provider: str
     tts_model: str
     tts_voice: str
@@ -73,6 +73,11 @@ class Config:
     tts_sample_rate: int
     tts_fallback_provider: str
     siliconflow_tts_voice: str
+    siliconflow_api_key: str
+    piper_model_path: str
+    melo_model_dir: str
+    melo_speaker_id: int
+    melo_speed: float
 
     dashscope_api_key: str
 
@@ -123,6 +128,12 @@ class Config:
             siliconflow_tts_voice=_get(
                 "SILICONFLOW_TTS_VOICE", "FunAudioLLM/CosyVoice2-0.5B:claire"
             ),
+            # 硅基流动 ASR 与 TTS 共用同一家 key；未单独配置时复用 ASR key。
+            siliconflow_api_key=_get("SILICONFLOW_API_KEY") or asr_transcribe_key,
+            piper_model_path=_get("PIPER_MODEL_PATH", "models/zh_CN-huayan-medium.onnx"),
+            melo_model_dir=_get("MELO_MODEL_DIR"),
+            melo_speaker_id=_get_int("MELO_SPEAKER_ID", 100),
+            melo_speed=_get_float("MELO_SPEED", 1.0),
             dashscope_api_key=_get("DASHSCOPE_API_KEY"),
             utterance_silence=_get_float("UTTERANCE_SILENCE", 0.8),
             mcp_timeout=_get_float("MCP_TIMEOUT", 30.0),
@@ -145,8 +156,16 @@ class Config:
                 "TTS 走 DashScope 但 DASHSCOPE_API_KEY 未配置"
                 "（免费方案：TTS_PROVIDER=edge，无需任何 key）"
             )
-        if self.tts_provider not in ("edge", "dashscope"):
-            errors.append("TTS_PROVIDER 仅支持 edge / dashscope")
+        if self.tts_provider not in ("edge", "dashscope", "siliconflow", "piper", "melo"):
+            errors.append("TTS_PROVIDER 仅支持 edge / dashscope / siliconflow / piper / melo")
+        if self.tts_provider == "siliconflow" and not self.siliconflow_api_key:
+            errors.append(
+                "TTS 走硅基流动但未配置 API Key（设置 SILICONFLOW_API_KEY 或 ASR_TRANSCRIBE_KEY）"
+            )
+        if self.tts_provider == "piper" and not self.piper_model_path:
+            errors.append("TTS 走 Piper 但 PIPER_MODEL_PATH 未配置")
+        if self.tts_provider == "melo" and not self.melo_model_dir:
+            errors.append("TTS 走 MeloTTS 但 MELO_MODEL_DIR 未配置")
         if not self.qwenpaw_base_url.startswith(("http://", "https://")):
             errors.append("QWENPAW_BASE_URL 必须以 http:// 或 https:// 开头")
         if self.tts_sample_rate not in (16000, 24000):

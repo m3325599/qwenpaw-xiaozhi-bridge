@@ -73,6 +73,12 @@ def main() -> None:
         asr_desc = f"{cfg.asr_model}（DashScope）"
     if cfg.tts_provider == "edge":
         tts_desc = f"edge-tts/{cfg.edge_tts_voice}（免费）"
+    elif cfg.tts_provider == "siliconflow":
+        tts_desc = f"硅基流动/{cfg.siliconflow_tts_voice}（免费额度）"
+    elif cfg.tts_provider == "piper":
+        tts_desc = f"Piper 本地/{cfg.piper_model_path}"
+    elif cfg.tts_provider == "melo":
+        tts_desc = f"MeloTTS 本地/{cfg.melo_model_dir}（speaker {cfg.melo_speaker_id}）"
     else:
         tts_desc = f"{cfg.tts_model}({cfg.tts_voice})（DashScope）"
 
