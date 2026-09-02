@@ -52,6 +52,27 @@ logger = logging.getLogger("bridge.session")
 _SENTENCE_RE = re.compile(r"[^。！？!?；;\n]*[。！？!?；;\n]+")
 _HARD_FLUSH_LEN = 100
 
+# 用户说出这些话时，回复结束后让设备进入待机（idle），等待下次唤醒词。
+# 与官方小智平台的行为对齐：结束会话后不再自动继续监听。
+_STANDBY_KEYWORDS = (
+    "休息吧",
+    "退下",
+    "退下吧",
+    "晚安",
+    "再见",
+    "拜拜",
+    "睡觉吧",
+    "睡觉了",
+    "睡了",
+    "关机",
+    "待机",
+    "不聊了",
+    "不说了",
+    "goodbye",
+    "good night",
+    "bye bye",
+)
+
 # 服务端 VAD（供非流式 transcribe 后端在 auto 模式下做静音判定）的阈值。
 _VAD_CALIBRATION_FRAMES = 10  # 前 N 帧（约 600ms）用于估计噪声底噪
 _VAD_FLOOR_FALLBACK = 120.0  # 校准期无静音帧时的回退噪声水平
@@ -404,6 +425,9 @@ class DeviceSession:
                 logger.exception("Response task error")
 
     async def _respond(self, text: str) -> None:
+        # 检测用户是否表达了结束会话/待机意图；命中时回复结束后主动断开
+        # WebSocket，触发设备 OnAudioChannelClosed -> 进入 kDeviceStateIdle。
+        should_standby = any(keyword in text.lower() for keyword in _STANDBY_KEYWORDS)
         turn = TtsTurn(self.cfg, self.encoder, self._executor, self._send_json, self.send_audio)
         try:
             await self._send_json({"type": "llm", "emotion": "happy"})
@@ -434,6 +458,8 @@ class DeviceSession:
                 # leaves the speaking state.
                 await self._send_json({"type": "tts", "state": "start"})
                 await self._send_json({"type": "tts", "state": "stop"})
+            if should_standby:
+                await self._enter_standby()
         except (QwenPawError, asyncio.TimeoutError) as exc:
             logger.error("Response failed: %s", exc)
             await turn.abort()
@@ -445,6 +471,18 @@ class DeviceSession:
             logger.exception("Unexpected error in response pipeline")
             await turn.abort()
             await self._speak_error("桥接服务内部错误，请查看日志")
+
+    async def _enter_standby(self) -> None:
+        """主动关闭 WebSocket，让设备回到待机（idle），等待下次唤醒词。
+
+        官方小智平台在结束会话后会断开音频通道；这里在检测到待机关键词并
+        完成回复后做同样的事，触发设备端 OnAudioChannelClosed -> idle。
+        """
+        logger.info("Standby keyword matched for %s, closing channel", self.device_id)
+        try:
+            await self.ws.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("close channel failed: %s", exc)
 
     async def _speak_error(self, message: str) -> None:
         """Tell the user something went wrong, using a fresh TTS turn."""
