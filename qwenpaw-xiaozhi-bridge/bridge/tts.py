@@ -107,6 +107,38 @@ async def _edge_tts_pcm(text: str, voice: str, sample_rate: int, retries: int = 
     raise RuntimeError(f"edge-tts 合成失败: {last_error}")
 
 
+async def _siliconflow_tts_pcm(text: str, voice: str, sample_rate: int, api_key: str) -> bytes:
+    """Synthesize one sentence via SiliconFlow TTS (OpenAI-compatible speech API).
+
+    Uses ``response_format=pcm`` and ``stream=false`` so the response body is a
+    single raw PCM16 mono blob, matching the bridge's downstream expectations.
+    """
+    import aiohttp
+
+    url = "https://api.siliconflow.cn/v1/audio/speech"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": "FunAudioLLM/CosyVoice2-0.5B",
+        "input": text,
+        "voice": voice,
+        "response_format": "pcm",
+        "sample_rate": sample_rate,
+        "stream": False,
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload, headers=headers) as resp:
+            if resp.status != 200:
+                body = await resp.text()
+                raise RuntimeError(f"硅基流动 TTS 失败 ({resp.status}): {body}")
+            data = await resp.read()
+    if not data:
+        raise RuntimeError("硅基流动 TTS 返回空音频")
+    return data
+
+
 class _TtsCallback(ResultCallback):  # type: ignore[misc]
     def __init__(
         self,
@@ -248,14 +280,37 @@ class TtsTurn:
         await self._send_json({"type": "tts", "state": "sentence_start", "text": first_text})
 
     async def _edge_speak(self, text: str) -> None:
-        """Synthesize one sentence with edge-tts and queue the PCM."""
+        """Synthesize one sentence with edge-tts and queue the PCM.
+
+        Falls back to SiliconFlow TTS when edge-tts is unavailable (e.g. the
+        intermittent "No audio was received" failure), so one bad sentence no
+        longer cuts the whole reply short.
+        """
         await self._send_json({"type": "tts", "state": "sentence_start", "text": text})
         try:
             pcm = await _edge_tts_pcm(text, self._cfg.edge_tts_voice, self._cfg.tts_sample_rate)
         except Exception as exc:  # noqa: BLE001
-            logger.error("edge-tts synthesis failed: %s", exc)
-            self._on_error(str(exc))
-            return
+            logger.warning("edge-tts 失败，尝试回退 TTS: %s", exc)
+            if (
+                self._cfg.tts_fallback_provider == "siliconflow"
+                and self._cfg.asr_transcribe_key
+            ):
+                try:
+                    pcm = await _siliconflow_tts_pcm(
+                        text,
+                        self._cfg.siliconflow_tts_voice,
+                        self._cfg.tts_sample_rate,
+                        self._cfg.asr_transcribe_key,
+                    )
+                    logger.info("已切换到硅基流动 TTS 合成")
+                except Exception as fexc:  # noqa: BLE001
+                    logger.error("硅基流动 TTS 回退失败: %s", fexc)
+                    self._on_error(f"TTS 合成失败: {exc}; 回退失败: {fexc}")
+                    return
+            else:
+                logger.error("edge-tts synthesis failed: %s", exc)
+                self._on_error(str(exc))
+                return
         if pcm:
             self._on_pcm(pcm)
 

@@ -71,6 +71,8 @@ class Config:
     tts_voice: str
     edge_tts_voice: str
     tts_sample_rate: int
+    tts_fallback_provider: str
+    siliconflow_tts_voice: str
 
     dashscope_api_key: str
 
@@ -117,6 +119,10 @@ class Config:
             tts_voice=_normalize_voice(_get("TTS_VOICE", "longxiaochun_v2"), tts_model),
             edge_tts_voice=_get("EDGE_TTS_VOICE", "zh-CN-XiaoxiaoNeural"),
             tts_sample_rate=_get_int("TTS_SAMPLE_RATE", 24000),
+            tts_fallback_provider=_get("TTS_FALLBACK_PROVIDER", "siliconflow").lower(),
+            siliconflow_tts_voice=_get(
+                "SILICONFLOW_TTS_VOICE", "FunAudioLLM/CosyVoice2-0.5B:claire"
+            ),
             dashscope_api_key=_get("DASHSCOPE_API_KEY"),
             utterance_silence=_get_float("UTTERANCE_SILENCE", 0.8),
             mcp_timeout=_get_float("MCP_TIMEOUT", 30.0),
