@@ -66,33 +66,45 @@ def clean_for_tts(text: str) -> str:
     return text.strip()
 
 
-async def _edge_tts_pcm(text: str, voice: str, sample_rate: int) -> bytes:
+async def _edge_tts_pcm(text: str, voice: str, sample_rate: int, retries: int = 2) -> bytes:
     """Synthesize one sentence via edge-tts and decode to PCM16 mono.
 
-    Returns b"" when nothing could be produced.
+    edge-tts opens a fresh WebSocket to Microsoft per sentence; occasional
+    transient failures (rate limiting / flaky network) manifest as "no audio".
+    Retry a couple of times before giving up. Returns b"" when nothing could
+    be produced after all attempts.
     """
     import edge_tts
     import miniaudio
 
-    communicate = edge_tts.Communicate(text, voice)
-    mp3 = bytearray()
-    async for chunk in communicate.stream():
-        if chunk.get("type") == "audio" or "data" in chunk:
-            data = chunk.get("data")
-            if data:
-                mp3.extend(data)
-    if not mp3:
-        return b""
-    sound = miniaudio.decode(
-        bytes(mp3),
-        output_format=miniaudio.SampleFormat.SIGNED16,
-        nchannels=1,
-        sample_rate=sample_rate,
-    )
-    try:
-        return sound.samples.tobytes()
-    except AttributeError:  # older miniaudio: array('h')
-        return bytes(memoryview(sound.samples))
+    last_error: str | None = None
+    for attempt in range(retries + 1):
+        try:
+            communicate = edge_tts.Communicate(text, voice)
+            mp3 = bytearray()
+            async for chunk in communicate.stream():
+                if chunk.get("type") == "audio":
+                    data = chunk.get("data")
+                    if data:
+                        mp3.extend(data)
+            if mp3:
+                sound = miniaudio.decode(
+                    bytes(mp3),
+                    output_format=miniaudio.SampleFormat.SIGNED16,
+                    nchannels=1,
+                    sample_rate=sample_rate,
+                )
+                try:
+                    return sound.samples.tobytes()
+                except AttributeError:  # older miniaudio: array('h')
+                    return bytes(memoryview(sound.samples))
+            last_error = "未收到音频数据"
+        except Exception as exc:  # noqa: BLE001
+            last_error = str(exc)
+        # Small backoff before retrying; the first failure is often transient.
+        if attempt < retries:
+            await asyncio.sleep(0.6 * (attempt + 1))
+    raise RuntimeError(f"edge-tts 合成失败: {last_error}")
 
 
 class _TtsCallback(ResultCallback):  # type: ignore[misc]

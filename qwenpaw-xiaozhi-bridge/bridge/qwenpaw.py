@@ -20,6 +20,32 @@ import aiohttp
 
 logger = logging.getLogger("bridge.qwenpaw")
 
+# Message ``type`` values that are intermediate steps and must never be spoken:
+# the model's thinking plus any tool/plugin/MCP activity in a ReAct loop.
+_SKIP_MSG_TYPES = {
+    "reasoning",
+    "thinking",
+    "function_call",
+    "function_call_output",
+    "plugin_call",
+    "plugin_call_output",
+    "component_call",
+    "component_call_output",
+    "mcp_list_tools",
+    "mcp_approval_request",
+    "mcp_call",
+    "mcp_approval_response",
+    "mcp_call_output",
+    "tool",
+    "tool_call",
+    "tool_call_output",
+}
+
+# Message ``type`` values that carry the final spoken reply. The runtime's
+# protocol uses "message", while some console builds put the role ("assistant")
+# into the type field; both are treated as speakable.
+_SPEAK_MSG_TYPES = {"message", "assistant", "text"}
+
 
 class QwenPawError(RuntimeError):
     pass
@@ -73,21 +99,43 @@ class QwenPawClient:
                 if resp.status != 200:
                     body = (await resp.text())[:300]
                     raise QwenPawError(f"QwenPaw HTTP {resp.status}: {body}")
-                # msg_id -> message kind ("reasoning" | "message"); reasoning
-                # content must be filtered out of the spoken reply.
+                # msg_id -> "speak" (final answer) or "skip" (reasoning/tool
+                # activity). Content is only yielded for "speak" messages.
                 msg_kind: dict[str, str] = {}
                 # msg_ids whose incremental deltas have already been yielded.
                 streamed: set[str] = set()
+                # Whether any speakable text has been emitted this turn.
+                spoke = False
+                # Count filtered intermediate text so operators can see it works.
+                skipped_chars = 0
                 async for event in self._iter_sse(resp):
                     obj = event.get("object")
                     etype = event.get("type")
                     status = event.get("status")
                     eid = event.get("id")
+                    msg_id = event.get("msg_id")
 
-                    # Register each message's kind when it first appears, so we
-                    # can later tell reasoning apart from the final message.
-                    if obj == "message" and eid and etype in ("reasoning", "message"):
-                        msg_kind[eid] = etype
+                    logger.debug(
+                        "QwenPaw SSE object=%s type=%s status=%s id=%s msg_id=%s",
+                        obj, etype, status, eid, msg_id,
+                    )
+
+                    # Classify each message by its type. Reasoning and any
+                    # tool/plugin/MCP step are silent; only the final message
+                    # text is spoken.
+                    if obj == "message" and eid and etype:
+                        if etype in _SKIP_MSG_TYPES:
+                            msg_kind[eid] = "skip"
+                        elif etype in _SPEAK_MSG_TYPES:
+                            msg_kind[eid] = "speak"
+                        else:
+                            # Unknown type: be conservative and keep it silent
+                            # rather than risk reading the model's thinking.
+                            msg_kind[eid] = "skip"
+                        logger.debug(
+                            "QwenPaw message id=%s type=%s -> %s",
+                            eid, etype, msg_kind[eid],
+                        )
 
                     if status == "failed":
                         error = event.get("error") or {}
@@ -97,11 +145,12 @@ class QwenPawClient:
                         raise QwenPawError(f"QwenPaw: {message}")
 
                     if obj == "content" and etype == "text" and "text" in event:
-                        msg_id = event.get("msg_id")
-                        # Skip the model's thinking content entirely.
-                        if msg_kind.get(msg_id) == "reasoning":
-                            continue
                         chunk = event.get("text") or ""
+                        if msg_kind.get(msg_id) != "speak":
+                            # Thinking / tool narration: drop it (and any text
+                            # whose parent message type we couldn't resolve).
+                            skipped_chars += len(chunk)
+                            continue
                         if event.get("delta") is True:
                             # Incremental chunk: stream it immediately.
                             if chunk:
@@ -112,6 +161,7 @@ class QwenPawClient:
                                         time.monotonic() - started,
                                     )
                                 streamed.add(msg_id)
+                                spoke = True
                                 yield chunk
                         elif msg_id not in streamed and chunk:
                             # No incremental deltas arrived (non-streaming
@@ -122,9 +172,25 @@ class QwenPawClient:
                                     "QwenPaw 首个增量 %.1fs（非流式整体返回）",
                                     time.monotonic() - started,
                                 )
+                            streamed.add(msg_id)
+                            spoke = True
                             yield chunk
 
                     if obj == "response" and status == "completed":
+                        if skipped_chars:
+                            logger.info("QwenPaw 已过滤思考/工具内容 %d 字符", skipped_chars)
+                        # Safety net: if nothing was streamed (e.g. a build that
+                        # only reports the final output in the completed event),
+                        # pull the speakable text straight from ``output``.
+                        if not spoke:
+                            for output_msg in event.get("output") or []:
+                                if output_msg.get("type") not in _SPEAK_MSG_TYPES:
+                                    continue
+                                for part in output_msg.get("content") or []:
+                                    text = part.get("text") if isinstance(part, dict) else ""
+                                    if text:
+                                        spoke = True
+                                        yield text
                         logger.info(
                             "QwenPaw 回复完成，总耗时 %.1fs", time.monotonic() - started
                         )
