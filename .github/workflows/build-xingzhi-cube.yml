@@ -1,4 +1,4 @@
-name: Build XingZhi Cube 0.96 OLED (ML307)
+name: Build XingZhi Cube firmware
 
 on:
   workflow_dispatch:
@@ -13,6 +13,7 @@ on:
       - main
     paths:
       - 'main/boards/xingzhi-cube-0.96oled-ml307/**'
+      - 'main/boards/xingzhi-cube-1.54tft-wifi/**'
       - 'main/boards/common/**'
       - 'main/audio/**'
       - 'main/display/**'
@@ -43,13 +44,16 @@ permissions:
 
 jobs:
   build:
-    name: Build xingzhi-cube-0.96oled-ml307
+    name: Build ${{ matrix.board }}
     runs-on: ubuntu-latest
     container:
       image: espressif/idf:v6.0.1
-
-    outputs:
-      version: ${{ steps.version.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - xingzhi-cube-0.96oled-ml307
+          - xingzhi-cube-1.54tft-wifi
 
     steps:
       - name: Checkout
@@ -65,7 +69,36 @@ jobs:
           # 清除旧的 sdkconfig，确保 sdkconfig.defaults 中的配置生效（如地理编码 provider）
           rm -f sdkconfig
           idf.py fullclean 2>/dev/null || true
-          python scripts/release.py xingzhi-cube-0.96oled-ml307 --name xingzhi-cube-0.96oled-ml307
+          python scripts/release.py ${{ matrix.board }} --name ${{ matrix.board }}
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.board }}
+          path: |
+            build/merged-binary.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/xiaozhi.bin
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Download all firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
       - name: Get version
         id: version
@@ -74,34 +107,32 @@ jobs:
           VER=$(grep 'set(PROJECT_VER' CMakeLists.txt | head -1 | sed 's/.*"\(.*\)".*/\1/')
           echo "version=$VER" >> $GITHUB_OUTPUT
 
-      - name: Upload firmware artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: xingzhi-cube-0.96oled-ml307_v${{ steps.version.outputs.version }}
-          path: |
-            build/merged-binary.bin
-            build/bootloader/bootloader.bin
-            build/partition_table/partition-table.bin
-            build/xiaozhi.bin
-          if-no-files-found: error
+      - name: Rename firmware files
+        shell: bash
+        run: |
+          cp artifacts/xingzhi-cube-0.96oled-ml307/merged-binary.bin xingzhi-cube-0.96oled-ml307-merged-binary.bin
+          cp artifacts/xingzhi-cube-0.96oled-ml307/xiaozhi.bin xingzhi-cube-0.96oled-ml307-xiaozhi.bin
+          cp artifacts/xingzhi-cube-1.54tft-wifi/merged-binary.bin xingzhi-cube-1.54tft-wifi-merged-binary.bin
+          cp artifacts/xingzhi-cube-1.54tft-wifi/xiaozhi.bin xingzhi-cube-1.54tft-wifi-xiaozhi.bin
+          ls -lh
 
       - name: Generate release notes
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release) }}
         shell: bash
         run: |
           cat > release_body.md << 'BODYEOF'
           ## 文件说明
-          | 文件 | 用途 |
-          |---|---|
-          | `merged-binary.bin` | USB 刷入（完整固件，地址 0x0） |
-          | `xiaozhi.bin` | OTA 升级（仅 app 固件） |
+          | 文件 | 设备 | 用途 |
+          |---|---|---|
+          | `xingzhi-cube-0.96oled-ml307-merged-binary.bin` | 0.96 OLED (ML307) | USB 刷入（完整固件，地址 0x0） |
+          | `xingzhi-cube-0.96oled-ml307-xiaozhi.bin` | 0.96 OLED (ML307) | OTA 升级（仅 app 固件） |
+          | `xingzhi-cube-1.54tft-wifi-merged-binary.bin` | 1.54 TFT (WiFi) | USB 刷入（完整固件，地址 0x0） |
+          | `xingzhi-cube-1.54tft-wifi-xiaozhi.bin` | 1.54 TFT (WiFi) | OTA 升级（仅 app 固件） |
 
           ## OTA 升级
           对设备说：**"帮我升级固件"**，固件会从最新 Release 下载。
           BODYEOF
 
       - name: Delete old tag and release
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release) }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -113,15 +144,16 @@ jobs:
           git push origin --delete "$TAG" 2>/dev/null || true
 
       - name: Create/Update Release
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.upload_to_release) }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}-xingzhi-cube
-          name: 星智 Cube 0.96 OLED v${{ steps.version.outputs.version }}
+          name: 星智 Cube v${{ steps.version.outputs.version }}
           body_path: release_body.md
           files: |
-            build/merged-binary.bin
-            build/xiaozhi.bin
+            xingzhi-cube-0.96oled-ml307-merged-binary.bin
+            xingzhi-cube-0.96oled-ml307-xiaozhi.bin
+            xingzhi-cube-1.54tft-wifi-merged-binary.bin
+            xingzhi-cube-1.54tft-wifi-xiaozhi.bin
           prerelease: true
           make_latest: true
 
@@ -139,11 +171,17 @@ jobs:
           token: ${{ github.token }}
           fetch-depth: 0
 
-      - name: Download firmware artifact
+      - name: Download all firmware artifacts
         uses: actions/download-artifact@v4
         with:
-          name: xingzhi-cube-0.96oled-ml307_v${{ needs.build.outputs.version }}
           path: artifacts
+
+      - name: Get version
+        id: version
+        shell: bash
+        run: |
+          VER=$(grep 'set(PROJECT_VER' CMakeLists.txt | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$VER" >> $GITHUB_OUTPUT
 
       - name: Update OTA files
         shell: bash
@@ -152,27 +190,28 @@ jobs:
         run: |
           set -x
           mkdir -p update
-          cp artifacts/xiaozhi.bin update/xiaozhi.bin
-          ls -lh update/xiaozhi.bin
+          cp artifacts/xingzhi-cube-0.96oled-ml307/xiaozhi.bin update/xiaozhi.bin
+          cp artifacts/xingzhi-cube-1.54tft-wifi/xiaozhi.bin update/xiaozhi-1.54tft-wifi.bin
+          ls -lh update/
 
           git config --global --add safe.directory "$(pwd)"
           git config user.email "ci@github-actions.local"
           git config user.name "GitHub Actions"
-          git add -f update/xiaozhi.bin
+          git add -f update/xiaozhi.bin update/xiaozhi-1.54tft-wifi.bin
 
           # push 或 workflow_dispatch 且上传 release 时，同时更新 ota.json 版本号
           if [ "${{ github.event_name }}" = "push" ] || ([ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.upload_to_release }}" = "true" ]); then
             cat > ota.json << JSONEOF
           {
             "firmware": {
-              "version": "${{ needs.build.outputs.version }}",
+              "version": "${{ steps.version.outputs.version }}",
               "url": "https://git.maopi.org/https://raw.githubusercontent.com/${{ github.repository }}/main/update/xiaozhi.bin"
             }
           }
           JSONEOF
             git add ota.json
             git diff --cached --stat || true
-            git commit -m "chore: update firmware to v${{ needs.build.outputs.version }} [skip ci]" || echo "Commit failed or nothing to commit"
+            git commit -m "chore: update firmware to v${{ steps.version.outputs.version }} [skip ci]" || echo "Commit failed or nothing to commit"
           else
             git diff --cached --stat || true
             git commit -m "chore: update OTA firmware binary [skip ci]" || echo "Commit failed or nothing to commit"

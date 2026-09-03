@@ -820,6 +820,122 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(screen, lvgl_theme->text_color(), 0);
     lv_obj_set_style_bg_color(screen, lvgl_theme->background_color(), 0);
 
+#if CONFIG_USE_FULLSCREEN_TEXT_SCROLL
+    // Fullscreen chat text layout: no emoji/emotion, full width wrapped text
+    // with vertical loop scrolling when content overflows the screen.
+    container_ = lv_obj_create(screen);
+    lv_obj_set_size(container_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_radius(container_, 0, 0);
+    lv_obj_set_style_pad_all(container_, 0, 0);
+    lv_obj_set_style_border_width(container_, 0, 0);
+    lv_obj_set_style_bg_color(container_, lvgl_theme->background_color(), 0);
+    lv_obj_set_style_border_color(container_, lvgl_theme->border_color(), 0);
+    lv_obj_set_flex_flow(container_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(container_, 0, 0);
+
+    /* Top bar - status icons */
+    top_bar_ = lv_obj_create(container_);
+    lv_obj_set_size(top_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
+    lv_obj_set_style_radius(top_bar_, 0, 0);
+    lv_obj_set_style_bg_opa(top_bar_, LV_OPA_50, 0);
+    lv_obj_set_style_bg_color(top_bar_, lvgl_theme->background_color(), 0);
+    lv_obj_set_style_border_width(top_bar_, 0, 0);
+    lv_obj_set_style_pad_all(top_bar_, 0, 0);
+    lv_obj_set_style_pad_top(top_bar_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_bottom(top_bar_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_left(top_bar_, lvgl_theme->spacing(4), 0);
+    lv_obj_set_style_pad_right(top_bar_, lvgl_theme->spacing(4), 0);
+    lv_obj_set_flex_flow(top_bar_, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(top_bar_, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_scrollbar_mode(top_bar_, LV_SCROLLBAR_MODE_OFF);
+
+    network_label_ = lv_label_create(top_bar_);
+    lv_label_set_text(network_label_, "");
+    lv_obj_set_style_text_font(network_label_, icon_font, 0);
+    lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
+
+    lv_obj_t* right_icons = lv_obj_create(top_bar_);
+    lv_obj_set_size(right_icons, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(right_icons, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(right_icons, 0, 0);
+    lv_obj_set_style_pad_all(right_icons, 0, 0);
+    lv_obj_set_flex_flow(right_icons, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(right_icons, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    mute_label_ = lv_label_create(right_icons);
+    lv_label_set_text(mute_label_, "");
+    lv_obj_set_style_text_font(mute_label_, icon_font, 0);
+    lv_obj_set_style_text_color(mute_label_, lvgl_theme->text_color(), 0);
+
+    battery_label_ = lv_label_create(right_icons);
+    lv_label_set_text(battery_label_, "");
+    lv_obj_set_style_text_font(battery_label_, icon_font, 0);
+    lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_margin_left(battery_label_, lvgl_theme->spacing(2), 0);
+
+    /* Content - fullscreen scrollable chat text area */
+    content_ = lv_obj_create(container_);
+    lv_obj_set_width(content_, LV_HOR_RES);
+    lv_obj_set_flex_grow(content_, 1);
+    lv_obj_set_style_radius(content_, 0, 0);
+    lv_obj_set_style_pad_all(content_, lvgl_theme->spacing(4), 0);
+    lv_obj_set_style_border_width(content_, 0, 0);
+    lv_obj_set_style_bg_color(content_, lvgl_theme->chat_background_color(), 0);
+    lv_obj_set_scrollbar_mode(content_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(content_, LV_DIR_VER);
+
+    chat_message_label_ = lv_label_create(content_);
+    lv_obj_set_width(chat_message_label_, LV_HOR_RES - lvgl_theme->spacing(8));
+    lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_style_text_color(chat_message_label_, lvgl_theme->text_color(), 0);
+    lv_label_set_text(chat_message_label_, "");
+
+    /* Status bar - overlays the top bar for centered status text */
+    status_bar_ = lv_obj_create(screen);
+    lv_obj_set_size(status_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
+    lv_obj_set_style_radius(status_bar_, 0, 0);
+    lv_obj_set_style_bg_opa(status_bar_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(status_bar_, 0, 0);
+    lv_obj_set_style_pad_all(status_bar_, 0, 0);
+    lv_obj_set_style_pad_top(status_bar_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_bottom(status_bar_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_scrollbar_mode(status_bar_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);
+    lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);
+
+    notification_label_ = lv_label_create(status_bar_);
+    lv_obj_set_width(notification_label_, LV_HOR_RES * 0.75);
+    lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
+    lv_label_set_text(notification_label_, "");
+    lv_obj_align(notification_label_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
+
+    status_label_ = lv_label_create(status_bar_);
+    lv_obj_set_width(status_label_, LV_HOR_RES * 0.75);
+    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
+    lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
+    lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
+
+    /* Low battery popup */
+    low_battery_popup_ = lv_obj_create(screen);
+    lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_size(low_battery_popup_, LV_HOR_RES * 0.9, text_font->line_height * 2);
+    lv_obj_align(low_battery_popup_, LV_ALIGN_BOTTOM_MID, 0, -lvgl_theme->spacing(4));
+    lv_obj_set_style_bg_color(low_battery_popup_, lvgl_theme->low_battery_color(), 0);
+    lv_obj_set_style_radius(low_battery_popup_, lvgl_theme->spacing(4), 0);
+    low_battery_label_ = lv_label_create(low_battery_popup_);
+    lv_label_set_text(low_battery_label_, Lang::Strings::BATTERY_NEED_CHARGE);
+    lv_obj_set_style_text_color(low_battery_label_, lv_color_white(), 0);
+    lv_obj_center(low_battery_label_);
+    lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
+
+    return;
+#endif
+
     /* Container - used as background */
     container_ = lv_obj_create(screen);
     lv_obj_set_size(container_, LV_HOR_RES, LV_VER_RES);
@@ -1041,6 +1157,11 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
         }
         return;
     }
+#if CONFIG_USE_FULLSCREEN_TEXT_SCROLL
+    lv_label_set_text(chat_message_label_, content == nullptr ? "" : content);
+    lvgl_start_fullscreen_scroll(content_, chat_message_label_);
+    return;
+#else
     lv_label_set_text(chat_message_label_, content);
     // Show bottom_bar_ only when there is content (and subtitle is not globally hidden)
     if (bottom_bar_ != nullptr) {
@@ -1057,6 +1178,7 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
         lv_obj_align(bottom_bar_, LV_ALIGN_BOTTOM_MID, 0, 0);
     }
 #endif
+#endif
 }
 
 void LcdDisplay::ClearChatMessages() {
@@ -1072,6 +1194,10 @@ void LcdDisplay::ClearChatMessages() {
 #endif
 
 void LcdDisplay::SetEmotion(const char* emotion) {
+#if CONFIG_USE_FULLSCREEN_TEXT_SCROLL
+    // Emoji/emotion display is disabled in fullscreen text scroll mode.
+    return;
+#endif
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetEmotion('%s') called before SetupUI() - emotion will not be displayed!", emotion);
     }
@@ -1196,7 +1322,9 @@ void LcdDisplay::SetTheme(Theme* theme) {
     lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_text_color(mute_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
+    if (emoji_label_ != nullptr) {
+        lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
+    }
 
     // If we have the chat message style, update all message bubbles
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE

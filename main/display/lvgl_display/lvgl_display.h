@@ -49,5 +49,50 @@ protected:
     virtual void Unlock() = 0;
 };
 
+#if CONFIG_USE_FULLSCREEN_TEXT_SCROLL
+// Exec callback for the vertical scroll animation. Wraps lv_obj_set_scroll_y so
+// the third (anim_enable) argument stays a valid LV_ANIM_OFF instead of relying
+// on a function-pointer cast that would pass an undefined value.
+static void lvgl_fullscreen_scroll_anim_cb(void* var, int32_t value) {
+    lv_obj_set_scroll_y((lv_obj_t*)var, value, LV_ANIM_OFF);
+}
+
+// Starts a vertical up/down loop scroll for a wrapped label hosted inside a
+// vertically scrollable container. The label must use LV_LABEL_LONG_WRAP with
+// a fixed width and the container must have LV_DIR_VER scroll enabled.
+static inline void lvgl_start_fullscreen_scroll(lv_obj_t* scroll_obj, lv_obj_t* label) {
+    lv_obj_update_layout(scroll_obj);
+    lv_obj_update_layout(label);
+    lv_coord_t viewport_h = lv_obj_get_content_height(scroll_obj);
+    lv_coord_t label_h = lv_obj_get_height(label);
+    lv_coord_t max_scroll = label_h - viewport_h;
+
+    // Stop any previous scroll animation and reset to the top
+    lv_anim_delete(scroll_obj, lvgl_fullscreen_scroll_anim_cb);
+    lv_obj_set_scroll_y(scroll_obj, 0, LV_ANIM_OFF);
+
+    if (max_scroll <= 0) {
+        return;
+    }
+
+    // Scroll at a constant reading speed, with a pause at both ends
+    uint32_t duration = (uint32_t)max_scroll * 40;
+    if (duration < 3000) duration = 3000;
+    if (duration > 15000) duration = 15000;
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, scroll_obj);
+    lv_anim_set_exec_cb(&a, lvgl_fullscreen_scroll_anim_cb);
+    lv_anim_set_values(&a, 0, max_scroll);
+    lv_anim_set_duration(&a, duration);
+    lv_anim_set_playback_delay(&a, 1200);
+    lv_anim_set_playback_time(&a, duration);
+    lv_anim_set_repeat_delay(&a, 1200);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&a);
+}
+#endif
+
 
 #endif

@@ -149,6 +149,10 @@ void OledDisplay::SetChatMessage(const char* role, const char* content) {
         return;
     }
 
+#if CONFIG_USE_FULLSCREEN_TEXT_SCROLL
+    lv_label_set_text(chat_message_label_, content == nullptr ? "" : content);
+    lvgl_start_fullscreen_scroll(content_, chat_message_label_);
+#else
     // Replace all newlines with spaces
     std::string content_str = content;
     std::replace(content_str.begin(), content_str.end(), '\n', ' ');
@@ -163,6 +167,7 @@ void OledDisplay::SetChatMessage(const char* role, const char* content) {
             lv_obj_remove_flag(content_right_, LV_OBJ_FLAG_HIDDEN);
         }
     }
+#endif
 }
 
 void OledDisplay::SetupUI_128x64() {
@@ -176,6 +181,26 @@ void OledDisplay::SetupUI_128x64() {
     auto screen = lv_screen_active();
     lv_obj_set_style_text_font(screen, text_font, 0);
     lv_obj_set_style_text_color(screen, lv_color_black(), 0);
+
+#if CONFIG_USE_FULLSCREEN_TEXT_SCROLL
+    // Fullscreen chat text layout: no emotion icon, full width wrapped text
+    // with vertical loop scrolling when content overflows the screen.
+    content_ = lv_obj_create(screen);
+    lv_obj_set_size(content_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_radius(content_, 0, 0);
+    lv_obj_set_style_pad_all(content_, 0, 0);
+    lv_obj_set_style_border_width(content_, 0, 0);
+    lv_obj_set_scrollbar_mode(content_, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(content_, LV_DIR_VER);
+
+    chat_message_label_ = lv_label_create(content_);
+    lv_obj_set_width(chat_message_label_, LV_HOR_RES);
+    lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_LEFT, 0);
+    lv_label_set_text(chat_message_label_, "");
+
+    return;
+#endif
 
     /* Container */
     container_ = lv_obj_create(screen);
@@ -385,6 +410,9 @@ void OledDisplay::SetupUI_128x32() {
 }
 
 void OledDisplay::SetEmotion(const char* emotion) {
+#if CONFIG_USE_FULLSCREEN_TEXT_SCROLL
+    return;
+#endif
     const char* utf8 = font_awesome_get_utf8(emotion);
     DisplayLockGuard lock(this);
     if (emotion_label_ == nullptr) {

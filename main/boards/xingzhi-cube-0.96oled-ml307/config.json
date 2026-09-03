@@ -3,7 +3,7 @@
     "builds": [
         {
             "name": "xingzhi-cube-0.96oled-ml307",
-            "sdkconfig_append": []
+            "sdkconfig_append": ["CONFIG_USE_FULLSCREEN_TEXT_SCROLL=y"]
         }
     ]
 }

@@ -802,6 +802,17 @@ config USE_MULTILINE_CHAT_MESSAGE
         When disabled (default), a single-line horizontally scrolling label
         is shown at the bottom of the screen.
 
+config USE_FULLSCREEN_TEXT_SCROLL
+    bool "Use fullscreen scrollable chat text (no emotion/emoji)"
+    depends on USE_DEFAULT_MESSAGE_STYLE
+    default n
+    help
+        When enabled, chat messages are shown as fullscreen wrapped text using
+        the smallest text font so as much reply content as possible fits on
+        screen. When the text exceeds the visible area it scrolls vertically
+        in an up/down loop so the full content can be read. Emotion/emoji
+        display is disabled.
+
 choice WAKE_WORD_TYPE
     prompt "Wake Word Implementation Type"
     default USE_AFE_WAKE_WORD if (IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32P4) && SPIRAM
