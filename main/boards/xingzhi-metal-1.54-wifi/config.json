@@ -3,8 +3,7 @@
     "builds": [
         {
             "name": "xingzhi-metal-1.54-wifi",
-            "sdkconfig_append": [
-            ]
+            "sdkconfig_append": ["CONFIG_USE_FULLSCREEN_TEXT_SCROLL=y"]
         }
     ]
 }
