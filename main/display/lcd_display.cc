@@ -934,6 +934,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
 
     return;
+}
 #else
 
     /* Container - used as background */
