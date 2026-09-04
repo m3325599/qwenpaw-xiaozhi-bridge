@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import array
 import asyncio
+import collections
 import json
 import logging
 import math
@@ -73,11 +74,16 @@ _STANDBY_KEYWORDS = (
     "bye bye",
 )
 
-# 服务端 VAD（供非流式 transcribe 后端在 auto 模式下做静音判定）的阈值。
-_VAD_CALIBRATION_FRAMES = 10  # 前 N 帧（约 600ms）用于估计噪声底噪
-_VAD_FLOOR_FALLBACK = 120.0  # 校准期无静音帧时的回退噪声水平
-_VAD_FLOOR_RATIO = 4.0  # 语音阈值 = 噪声底噪 * 比值
-_VAD_MIN_RMS = 500.0  # 语音阈值的绝对下限
+# 服务端 VAD（供非流式 transcribe 后端在 auto 模式下做静音判定）。
+# 采用固定静音阈值：int16 单声道 RMS 低于该值视为静音帧（约 -36dBFS，安静房间）。
+# 不用动态底噪阈值——校准期若恰好全是说话声，底噪会被污染成语音音量，
+# 阈值 = 底噪*4 会让真实说话声也被判成“静音”，speech 永不触发（真机 44 秒延迟根因）。
+_VAD_SILENCE_RMS = 500.0
+# 静音判定采用滑动窗口：窗口内静音帧占比达到该比例、且当前确实安静时才收口。
+# 避免“一帧高于阈值就清零”导致环境噪声波动时永远凑不齐连续静音。
+_VAD_SILENCE_WINDOW_FRAMES = 16  # 约 1 秒（60ms/帧）
+_VAD_SILENCE_ACCEPT_RATIO = 0.75  # 窗口内静音帧占比要求
+_VAD_SPEECH_START_FRAMES = 3  # 窗口内非静音帧 ≥ 该值才认为开始说话（抗噪点）
 
 
 def _rms_int16(pcm: bytes) -> float:
@@ -150,10 +156,12 @@ class DeviceSession:
         self._asr_error_spoken = False
 
         # 服务端 VAD（仅 transcribe 后端 + auto 模式使用）
-        self._vad_floor: float | None = None
-        self._vad_init_count = 0
         self._vad_speech = False
-        self._vad_silence_ms = 0.0
+        # 最近静音/语音帧的历史（deque of bool，True=静音）。用于滑动窗口判定。
+        self._vad_frames: collections.deque = collections.deque(
+            maxlen=_VAD_SILENCE_WINDOW_FRAMES
+        )
+        self._vad_speech_start: float | None = None  # 进入语音态的时间戳（用于兜底超时）
 
         # Response state
         self._response_task: asyncio.Task | None = None
@@ -283,34 +291,68 @@ class DeviceSession:
 
         DashScope 流式 ASR 会用句子结束事件结束一句话；transcribe 后端没有
         流式事件，auto 模式下固件也不会主动发 listen stop，所以这里用能量
-        检测补上：检测到说话后，连续静音超过 UTTERANCE_SILENCE 秒即结束本句。
+        检测补上：检测到说话后，静音窗口占比达标即结束本句。
+
+        2026-09-04 修复（真机 44 秒延迟）：
+        - 用固定静音阈值（RMS<500）判定静音帧，不用动态底噪阈值——旧逻辑
+          校准期若恰逢说话（唤醒后立刻说话），底噪被污染成语音音量，阈值
+          变成语音的 4 倍，真实说话声反而全部被判“静音”，speech 永不触发、
+          话语永不收口，直到环境偶然变化；
+        - 静音收口用滑动窗口（16 帧内静音占比 ≥75% 且最近 4 帧均静音），
+          零星噪点不再导致永远凑不齐“连续静音”；
+        - 增加兜底超时：进入语音态超过 VAD_MAX_UTTERANCE_SEC 仍未收口时
+          强制结束，避免用户说完话后干等数十秒。
         """
         rms = _rms_int16(pcm)
-        frame_ms = len(pcm) / 2 / self.decoder.sample_rate * 1000.0
-
-        # 前若干帧估计噪声底噪（取最小值，抵抗少数高能量帧）
-        if self._vad_init_count < _VAD_CALIBRATION_FRAMES:
-            if self._vad_floor is None or rms < self._vad_floor:
-                self._vad_floor = rms
-            self._vad_init_count += 1
-            return
-
-        # 校准期若完全没有静音帧（噪声估计虚高），回退到固定噪声水平
-        noise = self._vad_floor if self._vad_floor is not None else _VAD_FLOOR_FALLBACK
-        if noise > 1500.0:
-            noise = _VAD_FLOOR_FALLBACK
-        threshold = max(noise * _VAD_FLOOR_RATIO, _VAD_MIN_RMS)
+        is_silent = rms < _VAD_SILENCE_RMS
+        self._vad_frames.append(is_silent)
 
         if not self._vad_speech:
-            if rms >= threshold:
+            # 窗口内非静音帧数足够多才认为“开始说话”，抗零星噪点
+            if not is_silent and self._vad_frames.count(False) >= _VAD_SPEECH_START_FRAMES:
                 self._vad_speech = True
-                self._vad_silence_ms = 0.0
-        elif rms >= threshold:
-            self._vad_silence_ms = 0.0
-        else:
-            self._vad_silence_ms += frame_ms
-            if self._vad_silence_ms >= self.cfg.utterance_silence * 1000.0:
+                self._vad_speech_start = time.monotonic()
+                logger.info(
+                    "VAD: speech start (rms=%.0f, silent=%s)", rms, is_silent
+                )
+            return
+
+        # 兜底：进入语音态后长时间未收口（如环境噪声持续偏大、VAD 误判一直在说话）
+        if self._vad_speech_start is not None and (
+            time.monotonic() - self._vad_speech_start
+            >= self.cfg.vad_max_utterance_sec
+        ):
+            logger.warning(
+                "VAD: speech exceeded %.1fs without silence, force finalize "
+                "(rms=%.0f silent_frames=%d/%d)",
+                self.cfg.vad_max_utterance_sec,
+                rms,
+                self._vad_frames.count(True),
+                len(self._vad_frames),
+            )
+            await self._finish_utterance()
+            return
+
+        if is_silent:
+            # 滑动窗口收口：窗口内静音帧占比达标，且最近几帧均为静音（当前确实安静）。
+            recent_silent = False
+            if len(self._vad_frames) >= 4:
+                recent_silent = all(list(self._vad_frames)[-4:])
+            if (
+                len(self._vad_frames) >= _VAD_SILENCE_WINDOW_FRAMES
+                and self._vad_frames.count(True) / len(self._vad_frames)
+                >= _VAD_SILENCE_ACCEPT_RATIO
+                and recent_silent
+            ):
+                logger.info(
+                    "VAD: silence detected, finalize (silent_frames=%d/%d "
+                    "rms=%.0f)",
+                    self._vad_frames.count(True),
+                    len(self._vad_frames),
+                    rms,
+                )
                 await self._finish_utterance()
+        # 有声音帧：不清零任何累计，窗口占比自动反映说话状态。
 
     # ------------------------------------------------------------------ ASR
 
@@ -329,10 +371,9 @@ class DeviceSession:
 
     async def _start_asr(self) -> None:
         self._asr_sentences = []
-        self._vad_floor = None
-        self._vad_init_count = 0
         self._vad_speech = False
-        self._vad_silence_ms = 0.0
+        self._vad_frames.clear()
+        self._vad_speech_start = None
         try:
             if self.cfg.asr_provider == "transcribe":
                 stream = TranscribeAsrStream(

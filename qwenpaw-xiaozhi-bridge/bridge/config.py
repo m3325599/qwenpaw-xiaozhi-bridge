@@ -84,6 +84,8 @@ class Config:
     utterance_silence: float
     mcp_timeout: float
     log_level: str
+    # 服务端 VAD 兜底：检测到语音后，超过该时长仍未判定“说话结束”则强制收口
+    vad_max_utterance_sec: float
 
     @property
     def chat_url(self) -> str:
@@ -138,6 +140,7 @@ class Config:
             utterance_silence=_get_float("UTTERANCE_SILENCE", 0.8),
             mcp_timeout=_get_float("MCP_TIMEOUT", 30.0),
             log_level=_get("LOG_LEVEL", "INFO").upper(),
+            vad_max_utterance_sec=_get_float("VAD_MAX_UTTERANCE_SEC", 20.0),
         )
 
     def validate(self) -> list[str]:
@@ -172,4 +175,6 @@ class Config:
             errors.append("TTS_SAMPLE_RATE 仅支持 16000 / 24000")
         if not 0.1 <= self.utterance_silence <= 5.0:
             errors.append("UTTERANCE_SILENCE 取值范围 0.1 ~ 5.0 秒")
+        if not 5.0 <= self.vad_max_utterance_sec <= 60.0:
+            errors.append("VAD_MAX_UTTERANCE_SEC 取值范围 5.0 ~ 60.0 秒")
         return errors
