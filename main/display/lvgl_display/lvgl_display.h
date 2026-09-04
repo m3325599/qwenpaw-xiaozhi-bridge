@@ -50,11 +50,11 @@ protected:
 };
 
 #if CONFIG_USE_FULLSCREEN_TEXT_SCROLL
-// Exec callback for the vertical scroll animation. Wraps lv_obj_set_scroll_y so
+// Exec callback for the vertical scroll animation. Wraps lv_obj_scroll_to_y so
 // the third (anim_enable) argument stays a valid LV_ANIM_OFF instead of relying
 // on a function-pointer cast that would pass an undefined value.
 static void lvgl_fullscreen_scroll_anim_cb(void* var, int32_t value) {
-    lv_obj_set_scroll_y((lv_obj_t*)var, value, LV_ANIM_OFF);
+    lv_obj_scroll_to_y((lv_obj_t*)var, value, LV_ANIM_OFF);
 }
 
 // Starts a vertical up/down loop scroll for a wrapped label hosted inside a
@@ -69,7 +69,7 @@ static inline void lvgl_start_fullscreen_scroll(lv_obj_t* scroll_obj, lv_obj_t* 
 
     // Stop any previous scroll animation and reset to the top
     lv_anim_delete(scroll_obj, lvgl_fullscreen_scroll_anim_cb);
-    lv_obj_set_scroll_y(scroll_obj, 0, LV_ANIM_OFF);
+    lv_obj_scroll_to_y(scroll_obj, 0, LV_ANIM_OFF);
 
     if (max_scroll <= 0) {
         return;
