@@ -14,7 +14,6 @@ on:
     paths:
       - 'main/boards/xingzhi-cube-0.96oled-ml307/**'
       - 'main/boards/xingzhi-cube-1.54tft-wifi/**'
-      - 'main/boards/xingzhi-metal-1.54-wifi/**'
       - 'main/boards/common/**'
       - 'main/audio/**'
       - 'main/display/**'
@@ -55,7 +54,6 @@ jobs:
         board:
           - xingzhi-cube-0.96oled-ml307
           - xingzhi-cube-1.54tft-wifi
-          - xingzhi-metal-1.54-wifi
 
     steps:
       - name: Checkout
@@ -116,8 +114,6 @@ jobs:
           cp artifacts/xingzhi-cube-0.96oled-ml307/xiaozhi.bin xingzhi-cube-0.96oled-ml307-xiaozhi.bin
           cp artifacts/xingzhi-cube-1.54tft-wifi/merged-binary.bin xingzhi-cube-1.54tft-wifi-merged-binary.bin
           cp artifacts/xingzhi-cube-1.54tft-wifi/xiaozhi.bin xingzhi-cube-1.54tft-wifi-xiaozhi.bin
-          cp artifacts/xingzhi-metal-1.54-wifi/merged-binary.bin xingzhi-metal-1.54-wifi-merged-binary.bin
-          cp artifacts/xingzhi-metal-1.54-wifi/xiaozhi.bin xingzhi-metal-1.54-wifi-xiaozhi.bin
           ls -lh
 
       - name: Generate release notes
@@ -131,8 +127,6 @@ jobs:
           | `xingzhi-cube-0.96oled-ml307-xiaozhi.bin` | 0.96 OLED (ML307) | OTA 升级（仅 app 固件） |
           | `xingzhi-cube-1.54tft-wifi-merged-binary.bin` | 1.54 TFT (WiFi) | USB 刷入（完整固件，地址 0x0） |
           | `xingzhi-cube-1.54tft-wifi-xiaozhi.bin` | 1.54 TFT (WiFi) | OTA 升级（仅 app 固件） |
-          | `xingzhi-metal-1.54-wifi-merged-binary.bin` | 1.54 TFT METAL (WiFi) | USB 刷入（完整固件，地址 0x0） |
-          | `xingzhi-metal-1.54-wifi-xiaozhi.bin` | 1.54 TFT METAL (WiFi) | OTA 升级（仅 app 固件） |
 
           ## OTA 升级
           对设备说：**"帮我升级固件"**，固件会从最新 Release 下载。
@@ -160,8 +154,6 @@ jobs:
             xingzhi-cube-0.96oled-ml307-xiaozhi.bin
             xingzhi-cube-1.54tft-wifi-merged-binary.bin
             xingzhi-cube-1.54tft-wifi-xiaozhi.bin
-            xingzhi-metal-1.54-wifi-merged-binary.bin
-            xingzhi-metal-1.54-wifi-xiaozhi.bin
           prerelease: true
           make_latest: true
 
@@ -200,13 +192,12 @@ jobs:
           mkdir -p update
           cp artifacts/xingzhi-cube-0.96oled-ml307/xiaozhi.bin update/xiaozhi.bin
           cp artifacts/xingzhi-cube-1.54tft-wifi/xiaozhi.bin update/xiaozhi-1.54tft-wifi.bin
-          cp artifacts/xingzhi-metal-1.54-wifi/xiaozhi.bin update/xiaozhi-metal-1.54-wifi.bin
           ls -lh update/
 
           git config --global --add safe.directory "$(pwd)"
           git config user.email "ci@github-actions.local"
           git config user.name "GitHub Actions"
-          git add -f update/xiaozhi.bin update/xiaozhi-1.54tft-wifi.bin update/xiaozhi-metal-1.54-wifi.bin
+          git add -f update/xiaozhi.bin update/xiaozhi-1.54tft-wifi.bin
 
           # push 或 workflow_dispatch 且上传 release 时，同时更新 ota.json 版本号
           if [ "${{ github.event_name }}" = "push" ] || ([ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.upload_to_release }}" = "true" ]); then
